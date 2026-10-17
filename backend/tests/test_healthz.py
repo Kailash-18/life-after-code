@@ -6,6 +6,7 @@ def test_backend_healthz(client):
     assert data["service"] == "sentinel-backend"
     assert "version" in data
 
+
 def test_root_route(client):
     response = client.get("/")
     assert response.status_code == 200

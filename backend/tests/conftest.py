@@ -1,5 +1,8 @@
+import hashlib
+import hmac
 import sys
 from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -7,13 +10,22 @@ from fastapi.testclient import TestClient
 backend_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(backend_root))
 
-from app.main import app
 from app.config import settings
+from app.main import app
+
+
+def generate_signature(secret: str, body_bytes: bytes) -> str:
+    hex_digest = hmac.new(
+        secret.encode("utf-8"), body_bytes, hashlib.sha256
+    ).hexdigest()
+    return f"sha256={hex_digest}"
+
 
 @pytest.fixture
 def client():
     with TestClient(app) as test_client:
         yield test_client
+
 
 @pytest.fixture
 def hmac_secret():
