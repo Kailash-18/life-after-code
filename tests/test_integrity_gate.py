@@ -1,11 +1,13 @@
 """
 Tests for Sentinel Deterministic Integrity Gate
 Verifies that all 9 test-weakening / cheating fixtures are blocked,
-and the clean fix fixture passes cleanly.
+the clean fix fixture passes cleanly, and JUnit XML generation maps
+findings (including harness escape variants) accurately.
 """
 
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 import pytest
 
@@ -58,3 +60,77 @@ def test_integrity_gate_passes_clean_fix():
     assert proc.returncode == 0, f"Expected clean patch to pass, but failed!\nOutput:\n{proc.stdout}\n{proc.stderr}"
     assert "Verdict:          PASS" in proc.stdout
     assert "Blocking findings: 0" in proc.stdout
+
+
+def test_integrity_gate_junit_xml_attribution(tmp_path):
+    """
+    Verifies that the generated JUnit XML correctly attributes harness-escape findings
+    (RULE_07_HARNESS_ESCAPE_EXIT and RULE_07_HARNESS_ESCAPE_ENV_CHECK) to the
+    'rule_07_no_harness_escapes' testcase.
+    """
+    patch_path = FIXTURES_DIR / "07_harness_escape_exit.patch"
+    junit_out = tmp_path / "junit_report.xml"
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(GATE_SCRIPT),
+            "--diff-file",
+            str(patch_path),
+            "--output-junit",
+            str(junit_out),
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 1
+    assert junit_out.exists()
+
+    tree = ET.parse(junit_out)
+    root = tree.getroot()
+    assert root.tag == "testsuite"
+    assert root.attrib["name"] == "sentinel.integrity_gate"
+
+    # Find the specific testcase for harness escape
+    harness_tc = None
+    for tc in root.findall("testcase"):
+        if tc.attrib.get("name") == "rule_07_no_harness_escapes":
+            harness_tc = tc
+            break
+
+    assert harness_tc is not None, "Missing rule_07_no_harness_escapes testcase in JUnit XML"
+    failure_el = harness_tc.find("failure")
+    assert failure_el is not None, "rule_07_no_harness_escapes testcase should be marked as failure"
+    assert "process termination" in failure_el.attrib.get("message", "").lower() or "harness escape" in failure_el.attrib.get("message", "").lower()
+
+
+def test_integrity_gate_detects_multiple_violations(tmp_path):
+    """Verifies that multiple findings across different rules in a single patch are all detected."""
+    multi_patch = tmp_path / "multi_cheat.patch"
+    multi_patch.write_text(
+        """diff --git a/.gitlab-ci.yml b/.gitlab-ci.yml
+--- a/.gitlab-ci.yml
++++ b/.gitlab-ci.yml
+@@ -1,2 +1,3 @@
+ test:
++  script: exit 0
+diff --git a/app/core.py b/app/core.py
+--- a/app/core.py
++++ b/app/core.py
+@@ -1,2 +1,4 @@
++def __eq__(self, other):
++    return True
+""",
+        encoding="utf-8",
+    )
+
+    proc = subprocess.run(
+        [sys.executable, str(GATE_SCRIPT), "--diff-file", str(multi_patch)],
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 1
+    assert "RULE_05_PROTECTED_CONFIG_MODIFIED" in proc.stdout
+    assert "RULE_09_EQ_OVERRIDDEN_TRUE" in proc.stdout

@@ -46,25 +46,51 @@ def run_command(cmd: List[str], cwd: Optional[Path] = None, timeout: int = 120) 
     )
 
 
-def extract_failure_type(pytest_output: str) -> str:
+def extract_failure_type(pytest_output: str, junit_xml_path: Optional[Path] = None) -> str:
     """
-    Inspect pytest stdout/stderr to detect the category of failure.
-    Returns: 'AssertionError', 'ImportError', 'SyntaxError', 'CollectionError', or 'RuntimeError'
+    Inspect pytest execution to detect the category of failure.
+    Uses JUnit XML if available, and falls back to strict pytest terminal line parsing.
+    Returns: 'AssertionError', 'ImportError', 'SyntaxError', 'CollectionError', or specific Exception name.
     """
-    if "SyntaxError:" in pytest_output:
+    # 1. Inspect JUnit XML if generated
+    if junit_xml_path and junit_xml_path.exists():
+        try:
+            tree = ET.parse(junit_xml_path)
+            for tc in tree.getroot().iter("testcase"):
+                for err in tc.findall("error"):
+                    msg = err.attrib.get("message", "")
+                    if "collection" in msg.lower():
+                        return "CollectionError"
+                    if "syntax" in msg.lower():
+                        return "SyntaxError"
+                    if "import" in msg.lower() or "module" in msg.lower():
+                        return "ImportError"
+                    return "CollectionError"
+                for fail in tc.findall("failure"):
+                    msg = fail.attrib.get("message", "")
+                    if msg.startswith("assert ") or "AssertionError" in msg:
+                        return "AssertionError"
+                    match = re.match(r"^([A-Za-z0-9_]+Error):", msg)
+                    if match:
+                        return match.group(1)
+        except Exception:
+            pass
+
+    # 2. Strict terminal line analysis (looking for pytest failure headers and summary lines)
+    if re.search(r"E\s+SyntaxError:", pytest_output) or "SyntaxError:" in pytest_output:
         return "SyntaxError"
-    if "ImportError:" in pytest_output or "ModuleNotFoundError:" in pytest_output:
+    if re.search(r"E\s+(?:ImportError|ModuleNotFoundError):", pytest_output):
         return "ImportError"
-    if "COLLECT_ERROR" in pytest_output or "errors during collection" in pytest_output.lower():
+    if "errors during collection" in pytest_output.lower() or "ERROR collecting" in pytest_output:
         return "CollectionError"
-    if "AssertionError" in pytest_output or "assert " in pytest_output:
+    if re.search(r"E\s+AssertionError\b", pytest_output) or re.search(r"E\s+assert\b", pytest_output):
         return "AssertionError"
-    
-    # Check for general exception classes in traceback summary
+
+    # Match general exception lines in traceback summary (e.g., 'E   ZeroDivisionError: division by zero')
     match = re.search(r"E\s+([A-Za-z0-9_]+Error):", pytest_output)
     if match:
         return match.group(1)
-        
+
     return "UnknownError"
 
 
@@ -93,14 +119,23 @@ def run_test_in_checkout(
         dest_test_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(test_abs_path, dest_test_path)
 
-        # Run pytest inside the worktree
-        test_cmd = [sys.executable, "-m", "pytest", str(dest_test_path), "-v", "--tb=short"]
+        # Run pytest inside the worktree with structured JUnit XML capture
+        wt_junit_xml = Path(temp_dir) / "wt_junit.xml"
+        test_cmd = [
+            sys.executable,
+            "-m",
+            "pytest",
+            str(dest_test_path),
+            "-v",
+            "--tb=short",
+            f"--junitxml={wt_junit_xml}",
+        ]
         proc = run_command(test_cmd, cwd=Path(temp_dir))
         
         failure_type = ""
         if proc.returncode != 0:
             combined = proc.stdout + "\n" + proc.stderr
-            failure_type = extract_failure_type(combined)
+            failure_type = extract_failure_type(combined, wt_junit_xml)
             
         return proc.returncode, proc.stdout, proc.stderr, failure_type
 
@@ -194,54 +229,73 @@ def main():
 
     # Step 1: Run against broken commit
     print(f"\n[1/2] Running test on broken commit ({args.broken})...")
-    broken_code, broken_out, broken_err, broken_fail_type = run_test_in_checkout(
-        repo_root, args.broken, test_abs, test_rel
-    )
-    
-    broken_outcome = "passed" if broken_code == 0 else "failed"
-    results["broken_run"] = {
-        "exit_code": broken_code,
-        "outcome": broken_outcome,
-        "failure_type": broken_fail_type,
-        "summary": (broken_out + "\n" + broken_err)[-2000:],
-    }
-    print(f"      Exit code: {broken_code} ({broken_outcome})")
-    if broken_fail_type:
-        print(f"      Detected failure type: {broken_fail_type}")
+    try:
+        broken_code, broken_out, broken_err, broken_fail_type = run_test_in_checkout(
+            repo_root, args.broken, test_abs, test_rel
+        )
+        broken_outcome = "passed" if broken_code == 0 else "failed"
+        results["broken_run"] = {
+            "exit_code": broken_code,
+            "outcome": broken_outcome,
+            "failure_type": broken_fail_type,
+            "summary": (broken_out + "\n" + broken_err)[-2000:],
+        }
+        print(f"      Exit code: {broken_code} ({broken_outcome})")
+        if broken_fail_type:
+            print(f"      Detected failure type: {broken_fail_type}")
 
-    # Check broken requirements: MUST fail with an assertion error
-    if broken_outcome == "passed":
-        results["rejection_reason"] = "Test did NOT fail on the broken revision (vacuous test)."
-        print(f"[-] REJECTED: {results['rejection_reason']}")
-    elif broken_fail_type in ("SyntaxError", "ImportError", "CollectionError"):
-        results["rejection_reason"] = f"Test failed due to {broken_fail_type}, not an assertion error."
-        print(f"[-] REJECTED: {results['rejection_reason']}")
-    elif broken_fail_type != "AssertionError":
-        # Allow if it's an explicit AssertionError or AssertionError derivative
-        results["rejection_reason"] = f"Test failed with {broken_fail_type or 'non-assertion'}, expected AssertionError."
+        # Check broken requirements: MUST fail with an assertion error
+        if broken_outcome == "passed":
+            results["rejection_reason"] = "Test did NOT fail on the broken revision (vacuous test)."
+            print(f"[-] REJECTED: {results['rejection_reason']}")
+        elif broken_fail_type in ("SyntaxError", "ImportError", "CollectionError"):
+            results["rejection_reason"] = f"Test failed due to {broken_fail_type}, not an assertion error."
+            print(f"[-] REJECTED: {results['rejection_reason']}")
+        elif broken_fail_type != "AssertionError":
+            results["rejection_reason"] = f"Test failed with {broken_fail_type or 'non-assertion'}, expected AssertionError."
+            print(f"[-] REJECTED: {results['rejection_reason']}")
+
+    except Exception as exc:
+        results["rejection_reason"] = f"Failed to execute test on broken commit ({args.broken}): {str(exc)}"
+        results["broken_run"] = {
+            "exit_code": 2,
+            "outcome": "error",
+            "failure_type": "InfrastructureError",
+            "summary": str(exc),
+        }
         print(f"[-] REJECTED: {results['rejection_reason']}")
 
     # Step 2: Run against fix commit if broken check passed
     if not results["rejection_reason"]:
         print(f"\n[2/2] Running test on fix commit ({args.fix})...")
-        fix_code, fix_out, fix_err, fix_fail_type = run_test_in_checkout(
-            repo_root, args.fix, test_abs, test_rel
-        )
-        fix_outcome = "passed" if fix_code == 0 else "failed"
-        results["fix_run"] = {
-            "exit_code": fix_code,
-            "outcome": fix_outcome,
-            "failure_type": fix_fail_type,
-            "summary": (fix_out + "\n" + fix_err)[-2000:],
-        }
-        print(f"      Exit code: {fix_code} ({fix_outcome})")
+        try:
+            fix_code, fix_out, fix_err, fix_fail_type = run_test_in_checkout(
+                repo_root, args.fix, test_abs, test_rel
+            )
+            fix_outcome = "passed" if fix_code == 0 else "failed"
+            results["fix_run"] = {
+                "exit_code": fix_code,
+                "outcome": fix_outcome,
+                "failure_type": fix_fail_type,
+                "summary": (fix_out + "\n" + fix_err)[-2000:],
+            }
+            print(f"      Exit code: {fix_code} ({fix_outcome})")
 
-        if fix_outcome != "passed":
-            results["rejection_reason"] = f"Test failed on the fix commit with {fix_fail_type or 'error'}."
+            if fix_outcome != "passed":
+                results["rejection_reason"] = f"Test failed on the fix commit with {fix_fail_type or 'error'}."
+                print(f"[-] REJECTED: {results['rejection_reason']}")
+            else:
+                results["verdict"] = "PROVEN"
+                print(f"[+] PROVEN: Test successfully fails on broken commit and passes on fix commit.")
+        except Exception as exc:
+            results["rejection_reason"] = f"Failed to execute test on fix commit ({args.fix}): {str(exc)}"
+            results["fix_run"] = {
+                "exit_code": 2,
+                "outcome": "error",
+                "failure_type": "InfrastructureError",
+                "summary": str(exc),
+            }
             print(f"[-] REJECTED: {results['rejection_reason']}")
-        else:
-            results["verdict"] = "PROVEN"
-            print(f"[+] PROVEN: Test successfully fails on broken commit and passes on fix commit.")
     else:
         results["fix_run"] = {
             "exit_code": None,

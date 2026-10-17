@@ -111,11 +111,20 @@ class IntegrityGateChecker:
             if not fdiff.strip():
                 continue
                 
-            # Extract file paths
-            header_match = re.search(r"^--- (?:a/)?([^\s\n]+)\n\+\+\+ (?:b/)?([^\s\n]+)", fdiff, flags=re.MULTILINE)
-            old_file = header_match.group(1) if header_match else "unknown"
-            new_file = header_match.group(2) if header_match else "unknown"
-            target_file = new_file if new_file != "/dev/null" else old_file
+            # Extract file paths from 'diff --git a/old b/new' or '--- / +++' headers
+            git_header = re.match(r"^(?:a/)?([^\s\n]+)\s+(?:b/)?([^\s\n]+)", fdiff.strip())
+            header_match = re.search(r"^--- (?:a/)?([^\s\n]+)\r?\n\+\+\+ (?:b/)?([^\s\n]+)", fdiff, flags=re.MULTILINE)
+            
+            old_file = "unknown"
+            new_file = "unknown"
+            if header_match:
+                old_file = header_match.group(1)
+                new_file = header_match.group(2)
+            elif git_header:
+                old_file = git_header.group(1)
+                new_file = git_header.group(2)
+                
+            target_file = new_file if new_file != "/dev/null" and new_file != "unknown" else old_file
             target_clean = target_file.strip().replace("\\", "/")
 
             added_lines = []
@@ -163,7 +172,7 @@ class IntegrityGateChecker:
                         rule_id="RULE_07_HARNESS_ESCAPE_ENV_CHECK",
                         severity="BLOCKING",
                         file=target_clean,
-                        message="Detected PYTEST_CURRENT_TEST environment check to bypass test execution.",
+                        message="Detected harness escape via PYTEST_CURRENT_TEST environment check.",
                         details=line.strip(),
                     )
 
@@ -268,6 +277,9 @@ def extract_file_statuses_from_diff(diff_text: str) -> List[Tuple[str, str]]:
                 statuses.append(("A", new_p))
             elif "deleted file mode" in block:
                 statuses.append(("D", old_p))
+            elif "rename from" in block:
+                statuses.append(("R", old_p))
+                statuses.append(("A", new_p))
             else:
                 statuses.append(("M", new_p))
     return statuses
