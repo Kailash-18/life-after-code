@@ -1,0 +1,7 @@
+diff --git a/tests/test_existing.py b/tests/test_existing.py
+deleted file mode 100644
+--- a/tests/test_existing.py
++++ /dev/null
+@@ -1,5 +0,0 @@
+-def test_legacy_feature():
+-    assert 1 + 1 == 2

@@ -1,0 +1,17 @@
+diff --git a/app/services/pricing.py b/app/services/pricing.py
+--- a/app/services/pricing.py
++++ b/app/services/pricing.py
+@@ -10,3 +10,5 @@ def calculate_discount(price: float, discount: float) -> float:
++    if discount <= 0:
++        return price
+     return price * (1.0 - discount)
+diff --git a/tests/regressions/test_inc_20261018_001.py b/tests/regressions/test_inc_20261018_001.py
+new file mode 100644
+--- /dev/null
++++ b/tests/regressions/test_inc_20261018_001.py
+@@ -0,0 +1,5 @@
++from app.services.pricing import calculate_discount
++
++def test_calculate_discount_zero():
++    result = calculate_discount(100.0, 0.0)
++    assert result == 100.0

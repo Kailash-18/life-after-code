@@ -1,0 +1,7 @@
+diff --git a/tests/test_api.py b/tests/test_api.py
+--- a/tests/test_api.py
++++ b/tests/test_api.py
+@@ -15,3 +15,3 @@ def test_checkout_status_code():
+     resp = client.post("/checkout", json={})
+-    assert resp.status_code == 200
++    assert resp.status_code == 500

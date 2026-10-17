@@ -1,1 +1,18 @@
 SENTINEL_AGENT_CONTEXT_Samvit.md
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Frontend / Node
+node_modules/
+dist/
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db
