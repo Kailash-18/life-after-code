@@ -1,6 +1,7 @@
 import time
+
 from fastapi import Request, Response
-from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 
 REQUEST_COUNT = Counter(
     "http_requests_total",
@@ -20,6 +21,7 @@ ERROR_COUNT = Counter(
     "Total HTTP server errors (5xx)",
     ["endpoint", "status_code"],
 )
+
 
 async def metrics_middleware(request: Request, call_next):
     # Skip measuring the /metrics and /healthz endpoints themselves to keep synthetic probe metrics pristine
@@ -49,5 +51,6 @@ async def metrics_middleware(request: Request, call_next):
         if status_code >= 500:
             ERROR_COUNT.labels(endpoint=endpoint, status_code=str(status_code)).inc()
 
-def get_metrics_response() -> Response:
+
+def get_metrics_response(request: Request = None) -> Response:
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
