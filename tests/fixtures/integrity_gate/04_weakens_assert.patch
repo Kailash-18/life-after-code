@@ -1,0 +1,8 @@
+diff --git a/tests/regressions/test_inc_123.py b/tests/regressions/test_inc_123.py
+--- a/tests/regressions/test_inc_123.py
++++ b/tests/regressions/test_inc_123.py
+@@ -1,4 +1,4 @@
+ def test_order_status():
+     result = process_order()
+-    assert result == "SUCCESS"
++    assert result

@@ -45,3 +45,15 @@ report*.xml
 .env
 .env.*
 !.env.example
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Frontend / Node
+node_modules/
+dist/
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db

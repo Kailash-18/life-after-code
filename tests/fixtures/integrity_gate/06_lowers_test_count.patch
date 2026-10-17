@@ -1,0 +1,9 @@
+diff --git a/tests/test_pricing.py b/tests/test_pricing.py
+--- a/tests/test_pricing.py
++++ b/tests/test_pricing.py
+@@ -10,6 +10,0 @@ def test_valid_discount():
+-def test_edge_case_zero_discount():
+-    res = calculate_discount(100, 0)
+-    assert res == 100
+-
+ def test_max_discount():

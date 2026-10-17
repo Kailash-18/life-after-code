@@ -1,0 +1,37 @@
+{
+  "schema_version": "1.0.0",
+  "incident_id": "inc-20261018-001",
+  "attempt_no": 1,
+  "outcome": "fix_proposed",
+  "facts": [
+    {
+      "fact": "Candidate revision canary returned 500 status on /api/v1/checkout endpoint with error rate 14.2% exceeding policy threshold (1.0%).",
+      "evidence_ref": "artifacts/evaluator_results.json#L18"
+    },
+    {
+      "fact": "Cloud Run logs show unhandled ZeroDivisionError in app/services/pricing.py at line 48 when discount_rate is 0.",
+      "evidence_ref": "artifacts/cloudrun_candidate_logs.txt#L104"
+    }
+  ],
+  "hypotheses": [
+    {
+      "hypothesis": "Commit d8f23a1 introduced a division by discount_rate without checking if discount_rate == 0.",
+      "confidence": "high",
+      "rationale": "Git diff on app/services/pricing.py shows the denominator calculation was refactored in this commit."
+    }
+  ],
+  "missing_evidence": [
+    "Database query latency traces during the canary window were not captured in the bundle."
+  ],
+  "suspected_change": {
+    "commit_sha": "d8f23a1b4c9e8a7d6e5f4c3b2a1e0f9a8b7c6d5e",
+    "file_path": "app/services/pricing.py",
+    "line_range": "45-52",
+    "reason": "Direct addition of unchecked division by discount parameter."
+  },
+  "proposed_fix_summary": "Add guard clause in calculate_discount to safely handle zero discount without division.",
+  "regression_test_strategy": {
+    "test_file": "tests/regressions/test_inc_20261018_001.py",
+    "expected_failure_type": "ZeroDivisionError (causing assertion failure on expected response)"
+  }
+}
