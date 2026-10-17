@@ -1,0 +1,55 @@
+# Project Sentinel — GitLab CI Pipeline
+# Authoritative remote quality & push gate for hackathon evaluation
+
+stages:
+  - lint
+  - test
+
+variables:
+  PYTHONUNBUFFERED: "1"
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+
+cache:
+  paths:
+    - .cache/pip
+
+lint:quality-gate:
+  stage: lint
+  image: python:3.11-slim
+  before_script:
+    - pip install ruff pyyaml jsonschema
+  script:
+    - echo "==> Running Ruff linter"
+    - ruff check .
+    - echo "==> Validating OpenAPI 3.1.0 and CI Event JSON Schema"
+    - python -c "import yaml, json, jsonschema; openapi = yaml.safe_load(open('docs/contracts/openapi.yaml', encoding='utf-8')); schema = json.load(open('docs/contracts/event.schema.json', encoding='utf-8')); jsonschema.Draft202012Validator.check_schema(schema); assert 'paths' in openapi; print('Contracts valid!')"
+
+test:app:
+  stage: test
+  image: python:3.11-slim
+  before_script:
+    - pip install -r app/requirements.txt
+  script:
+    - echo "==> Running Demo Target App test suite"
+    - pytest -v --junitxml=junit-app.xml --cov=app/app app/tests
+  artifacts:
+    when: always
+    reports:
+      junit: junit-app.xml
+    paths:
+      - junit-app.xml
+
+test:backend:
+  stage: test
+  image: python:3.11-slim
+  before_script:
+    - pip install -r backend/requirements.txt
+  script:
+    - echo "==> Running Sentinel Backend test suite"
+    - pytest -v --junitxml=junit-backend.xml --cov=backend/app backend/tests
+  artifacts:
+    when: always
+    reports:
+      junit: junit-backend.xml
+    paths:
+      - junit-backend.xml
