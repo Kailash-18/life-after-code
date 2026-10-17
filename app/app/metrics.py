@@ -1,4 +1,5 @@
 import time
+from typing import Optional
 from fastapi import Request, Response
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 
@@ -49,5 +50,5 @@ async def metrics_middleware(request: Request, call_next):
         if status_code >= 500:
             ERROR_COUNT.labels(endpoint=endpoint, status_code=str(status_code)).inc()
 
-def get_metrics_response() -> Response:
+def get_metrics_response(request: Optional[Request] = None) -> Response:
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
