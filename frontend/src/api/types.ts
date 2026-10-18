@@ -106,3 +106,71 @@ export interface Snapshot {
 }
 
 export interface EndpointState { path: string; ok: boolean | null; at: number | null; ms: number | null; error?: string }
+
+// ==============================================================================
+// Principal SRE, OPA Rego, eBPF & Multi-Region DR Telemetry Contracts
+// ==============================================================================
+
+export interface SRECompositeHealth {
+  health_score: number;
+  status: 'PASS' | 'WARN' | 'FAIL';
+  error_budget: {
+    burn_rate: number;
+    alert_tier: 'NORMAL' | 'TICKET' | 'PAGE_SEVERITY_2' | 'PAGE_SEVERITY_1';
+    hours_to_exhaustion: number;
+    recommended_action?: string;
+  };
+  hypothesis_testing: {
+    p_value: number;
+    is_significant: boolean;
+    interpretation?: string;
+  };
+  latency_iqr?: {
+    median: number;
+    q1: number;
+    q3: number;
+    iqr: number;
+    outlier_threshold: number;
+  };
+  statistical_anomalies_detected?: number;
+}
+
+export interface OPAComplianceReport {
+  timestamp: string;
+  policy_package: string;
+  allow: boolean;
+  compliance_score: number;
+  total_guardrails: number;
+  violations_count: number;
+  violations: string[];
+  status: 'APPROVED' | 'REJECTED_BY_POLICY_GATE';
+}
+
+export interface EBPFTelemetryReport {
+  timestamp: string;
+  samples_collected: number;
+  mean_transport_health_score: number;
+  status: 'PASS' | 'FAIL';
+  latency_decomposition_averages_ms: {
+    dns_resolution: number;
+    tcp_handshake: number;
+    tls_handshake: number;
+    server_ttfb: number;
+  };
+  kernel_socket_aggregates: {
+    total_tcp_retransmits: number;
+    total_syn_queue_drops: number;
+    retransmission_rate: number;
+  };
+}
+
+export interface DisasterRecoveryStatus {
+  timestamp: string;
+  primary_region: string;
+  secondary_region: string;
+  active_region: string;
+  rto_seconds: number;
+  rpo_seconds: number;
+  status: 'OPTIMAL' | 'DEGRADED';
+}
+
