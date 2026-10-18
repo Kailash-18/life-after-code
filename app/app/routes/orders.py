@@ -1,20 +1,25 @@
 import uuid
-from typing import List, Optional
+
+from app.config import settings
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
-from app.config import settings
 
 router = APIRouter(prefix="/api/v1/orders", tags=["orders"])
+
 
 class OrderItem(BaseModel):
     item_id: str
     quantity: int = Field(gt=0, description="Quantity must be greater than zero")
     unit_price: float = Field(gt=0.0, description="Unit price must be positive")
 
+
 class OrderCreate(BaseModel):
     customer_id: str
-    customer_tier: str = Field(default="standard", description="standard, premium, or enterprise")
-    items: List[OrderItem]
+    customer_tier: str = Field(
+        default="standard", description="standard, premium, or enterprise"
+    )
+    items: list[OrderItem]
+
 
 class OrderResponse(BaseModel):
     id: str
@@ -25,13 +30,15 @@ class OrderResponse(BaseModel):
     total_amount: float
     status: str
 
+
 # In-memory store for orders
 ORDERS_DB = {}
+
 
 def calculate_discount(customer_tier: str, subtotal: float, total_items: int) -> float:
     """
     Calculates order discount based on customer tier and volume.
-    
+
     NOTE ON REPRODUCIBLE FAULT:
     In the baseline (healthy) version, this safely computes tier discounts.
     If FAULT_INJECTION_MODE is active (or in the seeded faulty commit), a bug is triggered:
@@ -51,6 +58,7 @@ def calculate_discount(customer_tier: str, subtotal: float, total_items: int) ->
     rate = tier_rates.get(customer_tier.lower(), 0.0)
     return round(subtotal * rate, 2)
 
+
 @router.post("", response_model=OrderResponse, status_code=status.HTTP_201_CREATED)
 async def create_order(order: OrderCreate):
     try:
@@ -58,7 +66,7 @@ async def create_order(order: OrderCreate):
         total_items = sum(item.quantity for item in order.items)
         discount = calculate_discount(order.customer_tier, subtotal, total_items)
         total = round(subtotal - discount, 2)
-        
+
         order_id = f"ord-{uuid.uuid4().hex[:8]}"
         record = OrderResponse(
             id=order_id,
@@ -75,15 +83,19 @@ async def create_order(order: OrderCreate):
         # Unhandled in faulty version, returns 500
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Internal discount calculation fault: {str(e)}"
+            detail=f"Internal discount calculation fault: {e!s}",
         )
 
-@router.get("", response_model=List[OrderResponse])
+
+@router.get("", response_model=list[OrderResponse])
 async def list_orders():
     return list(ORDERS_DB.values())
+
 
 @router.get("/{order_id}", response_model=OrderResponse)
 async def get_order(order_id: str):
     if order_id not in ORDERS_DB:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Order not found"
+        )
     return ORDERS_DB[order_id]

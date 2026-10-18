@@ -1,13 +1,11 @@
-import pytest
 from app.config import settings
+
 
 def test_create_order_standard(client):
     payload = {
         "customer_id": "cust-001",
         "customer_tier": "standard",
-        "items": [
-            {"item_id": "item-a", "quantity": 2, "unit_price": 50.0}
-        ]
+        "items": [{"item_id": "item-a", "quantity": 2, "unit_price": 50.0}],
     }
     response = client.post("/api/v1/orders", json=payload)
     assert response.status_code == 201
@@ -17,13 +15,12 @@ def test_create_order_standard(client):
     assert data["total_amount"] == 100.0
     assert data["status"] == "confirmed"
 
+
 def test_create_order_premium_discount(client):
     payload = {
         "customer_id": "cust-002",
         "customer_tier": "premium",
-        "items": [
-            {"item_id": "item-b", "quantity": 1, "unit_price": 200.0}
-        ]
+        "items": [{"item_id": "item-b", "quantity": 1, "unit_price": 200.0}],
     }
     response = client.post("/api/v1/orders", json=payload)
     assert response.status_code == 201
@@ -32,14 +29,13 @@ def test_create_order_premium_discount(client):
     assert data["discount_amount"] == 20.0  # 10% discount
     assert data["total_amount"] == 180.0
 
+
 def test_get_order_by_id(client):
     # First create
     create_payload = {
         "customer_id": "cust-003",
         "customer_tier": "enterprise",
-        "items": [
-            {"item_id": "item-c", "quantity": 10, "unit_price": 10.0}
-        ]
+        "items": [{"item_id": "item-c", "quantity": 10, "unit_price": 10.0}],
     }
     create_res = client.post("/api/v1/orders", json=create_payload)
     order_id = create_res.json()["id"]
@@ -49,9 +45,11 @@ def test_get_order_by_id(client):
     assert get_res.json()["id"] == order_id
     assert get_res.json()["discount_amount"] == 20.0  # 20% discount
 
+
 def test_get_nonexistent_order(client):
     response = client.get("/api/v1/orders/ord-nonexistent")
     assert response.status_code == 404
+
 
 def test_fault_injection_triggers_500(client):
     # Enable fault injection
@@ -60,9 +58,7 @@ def test_fault_injection_triggers_500(client):
         payload = {
             "customer_id": "cust-fault-test",
             "customer_tier": "standard",
-            "items": [
-                {"item_id": "item-fault", "quantity": 1, "unit_price": 10.0}
-            ]
+            "items": [{"item_id": "item-fault", "quantity": 1, "unit_price": 10.0}],
         }
         response = client.post("/api/v1/orders", json=payload)
         assert response.status_code == 500

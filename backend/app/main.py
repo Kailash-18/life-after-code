@@ -1,14 +1,15 @@
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.exceptions import RequestValidationError
+
 from app.config import settings
-from app.routes.health import router as health_router
 from app.routes.events import router as events_router
-from app.routes.webhooks import router as webhooks_router
-from app.routes.status import router as status_router
+from app.routes.health import router as health_router
 from app.routes.incidents import router as incidents_router
 from app.routes.releases import router as releases_router
+from app.routes.status import router as status_router
+from app.routes.webhooks import router as webhooks_router
 
 app = FastAPI(
     title=settings.service_name,
@@ -25,6 +26,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 # Custom validation exception handler to ensure standard {error: {code, message, retryable}} contract
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
@@ -39,6 +41,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         },
     )
 
+
 # Register API v1 routes
 app.include_router(health_router)
 app.include_router(events_router)
@@ -46,6 +49,7 @@ app.include_router(webhooks_router)
 app.include_router(status_router)
 app.include_router(incidents_router)
 app.include_router(releases_router)
+
 
 @app.get("/", include_in_schema=False)
 async def root():
