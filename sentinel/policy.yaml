@@ -1,0 +1,159 @@
+# Project Sentinel — Canary & Rollout Health Policy
+# Authoritative threshold definitions for canary progression and automated rollback decisions.
+# Referenced by Sentinel Health Evaluator (sentinel/scripts/evaluator.py) and Deployment Controller.
+
+version: "1.0"
+service: "sentinel-target-app"
+
+# ==============================================================================
+# DEPLOYMENT STRATEGIES & POST-INCIDENT RECOMMENDATIONS
+# ==============================================================================
+deployment_strategies:
+  # The default and authoritative recommended deployment strategy for Sentinel recovery
+  recommended: "canary_progressive"
+  rationale: >-
+    Progressive Canary with private URL tag isolation is strongly recommended.
+    It guarantees 0% public traffic during initial synthetic health verification,
+    limits user exposure to at most 10% during initial rollout, and provides sub-second
+    Cloud Run traffic redirection back to known-good revisions without state loss.
+
+  options:
+    - id: "canary_progressive"
+      name: "Progressive Canary Rollout (Tag Isolated)"
+      recommended: true
+      suitability: "Production workloads, automated self-healing, critical microservices"
+      blast_radius: "10% maximum during initial public phase; 0% during tag probe phase"
+      rollback_speed_seconds: 1.5
+      cost_overhead: "Low (Cloud Run scales only for active traffic requests)"
+      zero_downtime: true
+      data_corruption_risk: "Very Low"
+      description: >-
+        Deploys candidate with dedicated URL tag (0% traffic). Runs deterministic synthetic
+        probes. Once certified, steps traffic (10% -> 25% -> 50% -> 100%) while continuously
+        measuring error rates against the stable baseline. Instant rollback on any policy breach.
+
+    - id: "blue_green"
+      name: "Blue/Green Instant Cutover"
+      recommended: false
+      suitability: "Long-lived monolithic services, non-HTTP workers, full stack migrations"
+      blast_radius: "100% upon traffic switch"
+      rollback_speed_seconds: 1.0
+      cost_overhead: "High (Requires 200% parallel running capacity on standby)"
+      zero_downtime: true
+      data_corruption_risk: "Medium (if faulty revision executes mutating DB writes before rollback)"
+      description: >-
+        Deploys an entirely parallel 'Green' revision alongside 'Blue'. Runs pre-flight checks,
+        then flips 100% traffic instantly from Blue to Green. While rollback is instantaneous,
+        any latent bug immediately impacts 100% of all incoming requests upon cutover.
+
+    - id: "shadow_traffic"
+      name: "Shadow / Dark Launch (Traffic Mirroring)"
+      recommended: false
+      suitability: "High-volume read-only APIs, machine learning inference models, caching layers"
+      blast_radius: "0% (Zero live user impact)"
+      rollback_speed_seconds: 0.0
+      cost_overhead: "Medium (Duplicates incoming request traffic downstream)"
+      zero_downtime: true
+      data_corruption_risk: "High for mutating writes (risk of duplicate payments or order creation)"
+      description: >-
+        Asynchronously clones real production traffic to the candidate revision. Real users never
+        receive candidate responses. Excellent for validating performance and error rates under real
+        traffic loads, but unsafe for state-mutating transactional services without custom mocking.
+
+    - id: "rolling_update"
+      name: "Rolling Update (Instance Replacement)"
+      recommended: false
+      suitability: "Traditional Kubernetes daemonsets or stateful container clusters"
+      blast_radius: "Proportional to instance replacement batch size (e.g. 20-33%)"
+      rollback_speed_seconds: 45.0
+      cost_overhead: "Low (Instances are incrementally replaced)"
+      zero_downtime: true
+      data_corruption_risk: "Medium"
+      description: >-
+        Progressively drains and replaces container instances one-by-one. Does not support fine-grained
+        statistical error-rate delta comparison against a stable baseline, and rollbacks require
+        re-spooling the previous container version, taking up to a minute.
+
+    - id: "direct_recreate"
+      name: "Direct Recreate / In-Place"
+      recommended: false
+      suitability: "Ephemeral development sandboxes, internal non-critical tools"
+      blast_radius: "100%"
+      rollback_speed_seconds: 120.0
+      cost_overhead: "None"
+      zero_downtime: false
+      data_corruption_risk: "High"
+      description: >-
+        Immediately cuts off the old revision and deploys the new revision in-place. Incurs service
+        downtime during spin-up. If faulty, recovery requires a full rebuild and re-deployment.
+        Strictly forbidden for production recovery loops.
+
+# ==============================================================================
+# CANARY PROGRESSION STAGES (Used when recommended strategy is selected)
+# ==============================================================================
+rollout:
+  stages:
+    - traffic_percent: 0
+      name: "tag_isolation"
+      min_duration_seconds: 3
+      required_samples: 10
+    - traffic_percent: 10
+      name: "canary_initial"
+      min_duration_seconds: 5
+      required_samples: 20
+    - traffic_percent: 25
+      name: "canary_expansion"
+      min_duration_seconds: 5
+      required_samples: 25
+    - traffic_percent: 50
+      name: "half_traffic"
+      min_duration_seconds: 5
+      required_samples: 25
+    - traffic_percent: 100
+      name: "full_promotion"
+      min_duration_seconds: 5
+      required_samples: 20
+
+# Evaluation gates: any breach triggers instant rollback and incident detection
+thresholds:
+  # Absolute thresholds for candidate
+  error_rate_max: 0.02              # Max 2% error rate permitted on candidate
+  p95_latency_ms_max: 300.0         # Max 300ms p95 latency permitted
+  health_endpoint_success_rate: 1.0 # 100% success required on /healthz
+
+  # Comparison against stable baseline
+  max_error_rate_delta: 0.01        # Candidate error rate cannot exceed stable by more than 1.0 percentage points
+  max_latency_ratio: 1.30           # Candidate p95 latency cannot exceed stable p95 by more than 30%
+
+# Synthetic probe configuration
+probe:
+  concurrency: 5
+  timeout_seconds: 4.0
+  endpoints:
+    - path: "/healthz"
+      method: "GET"
+      weight: 2
+      expected_status: 200
+    - path: "/api/v1/orders"
+      method: "GET"
+      weight: 3
+      expected_status: 200
+    - path: "/api/v1/orders"
+      method: "POST"
+      weight: 5
+      expected_status: 201
+      payload:
+        customer_id: "cust-synthetic-probe"
+        items:
+          - sku: "SKU-SENTINEL-TEST"
+            quantity: 2
+            unit_price: 49.99
+        tier: "gold"
+
+# Rollback policies
+rollback:
+  auto_rollback_on_breach: true
+  post_rollback_probe_samples: 15
+  post_rollback_max_error_rate: 0.00
+  notification_channels:
+    - "sentinel-backend-events"

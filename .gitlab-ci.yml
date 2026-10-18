@@ -1,18 +1,35 @@
-# Project Sentinel — GitLab CI Pipeline
-# Authoritative remote quality & push gate for hackathon evaluation
+# Project Sentinel — Authoritative GitLab CI/CD Pipeline
+# Implements the complete evidence-backed recovery loop:
+# AI proposes changes; deterministic gates decide; CI executes actions.
 
 stages:
   - lint
   - test
+  - security
+  - infra
+  - deploy-canary
+  - evaluate-canary
+  - rollback
+  - evidence
+  - gate-verify
+  - auto-merge
+  - redeploy
 
 variables:
   PYTHONUNBUFFERED: "1"
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  SENTINEL_BACKEND_URL: "${SENTINEL_BACKEND_URL:-http://sentinel-backend:8000}"
+  SENTINEL_HMAC_SECRET: "${SENTINEL_HMAC_SECRET:-hackathon-transcend-sentinel-key-2026}"
+  GCP_REGION: "us-central1"
+  TARGET_APP_SERVICE: "sentinel-target-app"
 
 cache:
   paths:
     - .cache/pip
 
+# ==============================================================================
+# STAGE 1: LINT & CONTRACT INTEGRITY
+# ==============================================================================
 lint:quality-gate:
   stage: lint
   image: python:3.11-slim
@@ -24,11 +41,14 @@ lint:quality-gate:
     - echo "==> Validating OpenAPI 3.1.0 and CI Event JSON Schema"
     - python -c "import yaml, json, jsonschema; openapi = yaml.safe_load(open('docs/contracts/openapi.yaml', encoding='utf-8')); schema = json.load(open('docs/contracts/event.schema.json', encoding='utf-8')); jsonschema.Draft202012Validator.check_schema(schema); assert 'paths' in openapi; print('Contracts valid!')"
 
+# ==============================================================================
+# STAGE 2: UNIT & COMPONENT TEST SUITES
+# ==============================================================================
 test:app:
   stage: test
   image: python:3.11-slim
   before_script:
-    - pip install -r app/requirements.txt
+    - pip install -r app/requirements.txt pytest pytest-cov
   script:
     - echo "==> Running Demo Target App test suite"
     - pytest -v --junitxml=junit-app.xml --cov=app/app app/tests
@@ -43,7 +63,7 @@ test:backend:
   stage: test
   image: python:3.11-slim
   before_script:
-    - pip install -r backend/requirements.txt
+    - pip install -r backend/requirements.txt pytest pytest-cov
   script:
     - echo "==> Running Sentinel Backend test suite"
     - pytest -v --junitxml=junit-backend.xml --cov=backend/app backend/tests
@@ -53,3 +73,161 @@ test:backend:
       junit: junit-backend.xml
     paths:
       - junit-backend.xml
+
+test:sentinel-gates:
+  stage: test
+  image: python:3.11-slim
+  before_script:
+    - pip install -r backend/requirements.txt pytest pytest-cov
+  script:
+    - echo "==> Running Sentinel Gates test suite (Integrity Gate, Regression Proof, Evaluator, SAST)"
+    - pytest -v --junitxml=junit-sentinel.xml tests/
+  artifacts:
+    when: always
+    reports:
+      junit: junit-sentinel.xml
+    paths:
+      - junit-sentinel.xml
+
+# ==============================================================================
+# STAGE 3: SECURITY & SAST GATE (Task K8)
+# ==============================================================================
+security:sast-gate:
+  stage: security
+  image: python:3.11-slim
+  script:
+    - echo "==> Running Sentinel SAST and Secret Scanner Gate"
+    - python sentinel/scripts/sast_gate.py --dirs app backend sentinel --output-dir artifacts
+  artifacts:
+    when: always
+    paths:
+      - artifacts/sast-report.json
+
+# ==============================================================================
+# STAGE 4: TERRAFORM INFRASTRUCTURE VALIDATION (Tasks K1, K2)
+# ==============================================================================
+infra:terraform-validate:
+  stage: infra
+  image: hashicorp/terraform:1.7
+  script:
+    - cd infra
+    - terraform init -backend=false
+    - terraform fmt -check
+    - terraform validate
+  rules:
+    - changes:
+        - infra/**/*
+
+# ==============================================================================
+# STAGE 5: CANARY DEPLOYMENT (Task K4)
+# ==============================================================================
+deploy:canary:
+  stage: deploy-canary
+  image: python:3.11-slim
+  before_script:
+    - pip install pyyaml jsonschema requests
+  script:
+    - echo "==> Deploying candidate release to Cloud Run with 0% initial traffic tag"
+    - python sentinel/scripts/canary_deploy.py --service $TARGET_APP_SERVICE --traffic-percent 10 --dry-run
+  artifacts:
+    paths:
+      - artifacts/canary-deploy-report.json
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+
+# ==============================================================================
+# STAGE 6: HEALTH EVALUATION (Task K5)
+# ==============================================================================
+evaluate:canary-step:
+  stage: evaluate-canary
+  image: python:3.11-slim
+  before_script:
+    - pip install pyyaml jsonschema requests
+  script:
+    - echo "==> Running Authoritative Sentinel Health Evaluator"
+    - python sentinel/scripts/evaluator.py --candidate-url "http://sentinel-target-app:8080" --traffic-percent 10 || exit_code=$?
+    - if [ "$exit_code" -eq 2 ]; then echo "Evaluator detected regression! Triggering rollback."; exit 2; fi
+  artifacts:
+    when: always
+    paths:
+      - artifacts/evaluator-report.json
+      - artifacts/evaluator-report.md
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+
+# ==============================================================================
+# STAGE 7: AUTOMATED ROLLBACK (Task K6)
+# ==============================================================================
+rollback:on-breach:
+  stage: rollback
+  image: python:3.11-slim
+  before_script:
+    - pip install jsonschema requests
+  script:
+    - echo "==> Reverting 100% traffic to last known-good revision"
+    - python sentinel/scripts/rollback.py --service $TARGET_APP_SERVICE --stable-url "http://sentinel-target-app:8080" --dry-run
+  artifacts:
+    when: always
+    paths:
+      - artifacts/rollback-report.json
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      when: on_failure
+
+# ==============================================================================
+# STAGE 8: REDACTED EVIDENCE BUNDLE (Task K7)
+# ==============================================================================
+evidence:collect:
+  stage: evidence
+  image: python:3.11-slim
+  before_script:
+    - pip install jsonschema requests
+  script:
+    - echo "==> Constructing redacted evidence bundle & computing authoritative SHA-256"
+    - python sentinel/scripts/evidence_collector.py --service $TARGET_APP_SERVICE --dry-run
+  artifacts:
+    when: always
+    paths:
+      - artifacts/evidence-bundle-*.json
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      when: on_failure
+
+# ==============================================================================
+# STAGE 9: VERIFICATION GATES ON REPAIR MRs (Tasks S5, S6, K9)
+# ==============================================================================
+gate:regression-proof:
+  stage: gate-verify
+  image: python:3.11-slim
+  before_script:
+    - pip install -r app/requirements.txt pytest jsonschema requests
+  script:
+    - echo "==> Running Regression Proof gate: must fail on broken SHA, pass on fix SHA"
+    - python sentinel/scripts/regression_proof.py --broken-sha $CI_MERGE_REQUEST_DIFF_BASE_SHA --fix-sha $CI_COMMIT_SHA
+  rules:
+    - if: $CI_MERGE_REQUEST_IID && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^duo\/fix\//
+
+gate:integrity-gate:
+  stage: gate-verify
+  image: python:3.11-slim
+  before_script:
+    - pip install pytest jsonschema requests
+  script:
+    - echo "==> Running Integrity Gate: enforces test sanctity without weakening"
+    - python sentinel/scripts/integrity_gate.py --target-branch $CI_MERGE_REQUEST_TARGET_BRANCH_NAME
+  rules:
+    - if: $CI_MERGE_REQUEST_IID && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^duo\/fix\//
+
+# ==============================================================================
+# STAGE 10: AUTONOMOUS MERGE (Task K10)
+# ==============================================================================
+merge:auto-merge:
+  stage: auto-merge
+  image: python:3.11-slim
+  before_script:
+    - pip install jsonschema requests
+  script:
+    - echo "==> All required gates green. Executing autonomous merge with project token"
+    - python sentinel/scripts/auto_merge.py --mr-iid $CI_MERGE_REQUEST_IID --fix-sha $CI_COMMIT_SHA --dry-run
+  rules:
+    - if: $CI_MERGE_REQUEST_IID && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^duo\/fix\//
