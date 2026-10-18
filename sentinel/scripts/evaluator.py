@@ -34,12 +34,25 @@ DEFAULT_POLICY_PATH = Path(__file__).resolve().parent.parent / "policy.yaml"
 
 
 
+import re
+
+
 def load_policy(policy_path: str | Path | None = None) -> dict[str, Any]:
     path = Path(policy_path or DEFAULT_POLICY_PATH)
     if not path.exists():
         raise FileNotFoundError(f"Policy file not found at {path}")
     with open(path, encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        raw_text = f.read()
+
+    # Dynamic environment variable expansion with ${VAR:-default} fallback syntax
+    def _sub_env(match: re.Match) -> str:
+        var_name = match.group(1)
+        default_val = match.group(2) if match.group(2) is not None else ""
+        return os.environ.get(var_name, default_val)
+
+    expanded_text = re.sub(r"\$\{([A-Za-z0-9_]+)(?::-([^}]+))?\}", _sub_env, raw_text)
+    return yaml.safe_load(expanded_text)
+
 
 
 def calculate_percentile(values: list[float], percentile: float) -> float:

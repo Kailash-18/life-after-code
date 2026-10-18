@@ -28,7 +28,7 @@ resource "google_compute_backend_service" "target_app_backend" {
   description           = "Production backend service for canary/stable target workload"
   protocol              = "HTTPS"
   port_name             = "http"
-  timeout_sec           = 30
+  timeout_sec           = var.backend_timeout_sec
   enable_cdn            = false
   security_policy       = google_compute_security_policy.sentinel_armor.id
   load_balancing_scheme = "EXTERNAL_MANAGED"
@@ -54,7 +54,7 @@ resource "google_compute_backend_service" "sentinel_api_backend" {
   description           = "Production backend service for Sentinel Mission Control FastAPI"
   protocol              = "HTTPS"
   port_name             = "http"
-  timeout_sec           = 30
+  timeout_sec           = var.backend_timeout_sec
   enable_cdn            = false
   security_policy       = google_compute_security_policy.sentinel_armor.id
   load_balancing_scheme = "EXTERNAL_MANAGED"
@@ -108,7 +108,7 @@ resource "google_compute_global_forwarding_rule" "sentinel_forwarding_rule" {
   name                  = "sentinel-global-forwarding-rule"
   description           = "Global L7 Ingress Forwarding Rule"
   ip_protocol           = "TCP"
-  port_range            = "80"
+  port_range            = var.lb_forwarding_port
   target                = google_compute_target_http_proxy.sentinel_http_proxy.id
   ip_address            = google_compute_global_address.sentinel_lb_ip.id
   load_balancing_scheme = "EXTERNAL_MANAGED"

@@ -3,7 +3,9 @@
 # Referenced by Sentinel Health Evaluator (sentinel/scripts/evaluator.py) and Deployment Controller.
 
 version: "1.0"
-service: "sentinel-target-app"
+service: "${TARGET_APP_SERVICE:-sentinel-target-app}"
+environment: "${SENTINEL_ENV:-prod}"
+
 
 # ==============================================================================
 # DEPLOYMENT STRATEGIES & POST-INCIDENT RECOMMENDATIONS

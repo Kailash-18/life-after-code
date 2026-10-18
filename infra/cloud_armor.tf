@@ -2,7 +2,7 @@
 # Layer 7 WAF, Adaptive Token-Bucket Rate Limiting, and Geo-Protection for Sentinel Microservices.
 
 resource "google_compute_security_policy" "sentinel_armor" {
-  name        = "sentinel-cloud-armor-policy"
+  name        = var.cloud_armor_policy_name
   description = "Principal SRE Cloud Armor policy: WAF, rate-limiting, and DDoS defense"
   project     = var.project_id
 
@@ -21,13 +21,14 @@ resource "google_compute_security_policy" "sentinel_armor" {
       exceed_action  = "deny(429)"
       enforce_on_key = "IP"
       rate_limit_threshold {
-        count        = 1000
-        interval_sec = 60
+        count        = var.rate_limit_threshold_count
+        interval_sec = var.rate_limit_interval_sec
       }
-      ban_duration_sec = 300
+      ban_duration_sec = var.rate_limit_ban_duration_sec
     }
-    description = "Throttle IP requests exceeding 1,000 req/min with 5-minute ban"
+    description = "Throttle IP requests exceeding threshold with automated temporary ban"
   }
+
 
   # Rule 2: SQL Injection (SQLi) & Cross-Site Scripting (XSS) Preconfigured WAF
   rule {

@@ -15,8 +15,8 @@ resource "google_cloud_run_v2_service" "target_app_failover" {
       }
       resources {
         limits = {
-          cpu    = "1000m"
-          memory = "512Mi"
+          cpu    = var.target_app_cpu
+          memory = var.target_app_memory
         }
       }
       env {
@@ -29,8 +29,8 @@ resource "google_cloud_run_v2_service" "target_app_failover" {
       }
     }
     scaling {
-      min_instance_count = 1
-      max_instance_count = 5
+      min_instance_count = var.target_app_min_instances
+      max_instance_count = var.target_app_max_instances
     }
   }
 
@@ -68,7 +68,7 @@ resource "google_compute_region_network_endpoint_group" "target_app_failover_neg
 # 3. Cloud DNS Private/Public Anycast Steering Zone
 resource "google_dns_managed_zone" "sentinel_zone" {
   name        = "sentinel-global-zone"
-  dns_name    = "sentinel-mesh.internal."
+  dns_name    = var.dns_domain_name
   description = "Principal SRE Cloud DNS Zone for automated multi-region steering"
   visibility  = "private"
 
@@ -81,10 +81,10 @@ resource "google_dns_managed_zone" "sentinel_zone" {
 
 # 4. Anycast Routing Record with Health Failover Policy
 resource "google_dns_record_set" "sentinel_anycast_record" {
-  name         = "edge.sentinel-mesh.internal."
+  name         = "edge.${var.dns_domain_name}"
   managed_zone = google_dns_managed_zone.sentinel_zone.name
   type         = "A"
-  ttl          = 5
+  ttl          = var.dns_ttl
 
   routing_policy {
     geo {
