@@ -1,4 +1,3 @@
-from typing import List, Optional
 from fastapi import APIRouter, HTTPException, status
 
 router = APIRouter(prefix="/api/v1/releases", tags=["releases"])
@@ -17,12 +16,14 @@ RELEASES_DB = {
     }
 }
 
+
 @router.get("")
-async def list_releases(limit: int = 20, status: Optional[str] = None):
+async def list_releases(limit: int = 20, status: str | None = None):
     releases = list(RELEASES_DB.values())
     if status:
         releases = [r for r in releases if r.get("status") == status]
     return releases[:limit]
+
 
 @router.get("/{release_id}")
 async def get_release(release_id: str):
@@ -33,8 +34,8 @@ async def get_release(release_id: str):
                 "error": {
                     "code": "RELEASE_NOT_FOUND",
                     "message": f"Release {release_id} not found.",
-                    "retryable": False
+                    "retryable": False,
                 }
-            }
+            },
         )
     return RELEASES_DB[release_id]

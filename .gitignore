@@ -55,5 +55,10 @@ dist/
 .env.local
 
 # OS
-.DS_Store
+*.DS_Store
 Thumbs.db
+
+# Project Sentinel CI & Gate Artifacts
+artifacts/
+*.tfstate*
+.terraform/
