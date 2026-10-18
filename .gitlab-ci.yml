@@ -80,7 +80,7 @@ test:sentinel-gates:
   before_script:
     - pip install -r backend/requirements.txt pytest pytest-cov
   script:
-    - echo "==> Running Sentinel Gates test suite (Integrity Gate, Regression Proof, Evaluator, SAST)"
+    - echo "==> Running Sentinel Gates test suite (Integrity Gate, Regression Proof, Evaluator, SAST, Statistical Analyzer, Chaos, Supply Chain)"
     - pytest -v --junitxml=junit-sentinel.xml tests/
   artifacts:
     when: always
@@ -89,8 +89,19 @@ test:sentinel-gates:
     paths:
       - junit-sentinel.xml
 
+chaos:resilience-simulation:
+  stage: test
+  image: python:3.11-slim
+  script:
+    - echo "==> Executing Chaos Engineering & Canary Circuit Breaker Simulation"
+    - python sentinel/scripts/chaos_engine.py --fault intermittent_503 --iterations 15
+  artifacts:
+    when: always
+    paths:
+      - artifacts/chaos-resilience-report.json
+
 # ==============================================================================
-# STAGE 3: SECURITY & SAST GATE (Task K8)
+# STAGE 3: SECURITY, SAST & SLSA PROVENANCE (Tasks K8, Principal SRE)
 # ==============================================================================
 security:sast-gate:
   stage: security
@@ -102,6 +113,18 @@ security:sast-gate:
     when: always
     paths:
       - artifacts/sast-report.json
+
+security:slsa-attestation:
+  stage: security
+  image: python:3.11-slim
+  script:
+    - echo "==> Generating in-toto SLSA Level 3 Provenance & CycloneDX SBOM"
+    - python sentinel/scripts/supply_chain_attestation.py --image "us-central1-docker.pkg.dev/project-sentinel/sentinel/target-app:${CI_COMMIT_SHA:-latest}" --commit-sha "${CI_COMMIT_SHA:-localdev}" --output-dir artifacts
+  artifacts:
+    when: always
+    paths:
+      - artifacts/attestation-*.json
+
 
 # ==============================================================================
 # STAGE 4: TERRAFORM INFRASTRUCTURE VALIDATION (Tasks K1, K2)

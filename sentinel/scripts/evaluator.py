@@ -28,8 +28,10 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from sentinel.scripts.emit_event import emit_event
+from sentinel.scripts.statistical_analyzer import compute_composite_health_score
 
 DEFAULT_POLICY_PATH = Path(__file__).resolve().parent.parent / "policy.yaml"
+
 
 
 def load_policy(policy_path: str | Path | None = None) -> dict[str, Any]:
@@ -160,7 +162,9 @@ def evaluate_target(
         "p99_ms": round(p99_ms, 2),
         "health_endpoint_ok": healthz_ok,
         "metrics_scrape": metrics_probe,
+        "raw_latencies": durations,
     }
+
 
 
 def run_evaluation(
@@ -244,6 +248,27 @@ def run_evaluation(
                 f"Candidate latency ratio ({lat_ratio:.2f}x) exceeds stable ratio limit ({max_lat_ratio:.2f}x)"
             )
 
+    # 3b. Principal SRE Statistical Hypothesis Testing & Multi-Burn-Rate Analysis
+    candidate_latencies = candidate_stats.get("raw_latencies", [])
+    stable_latencies = stable_stats.get("raw_latencies", []) if stable_stats else []
+    composite_health = compute_composite_health_score(
+        candidate_latencies=candidate_latencies,
+        stable_latencies=stable_latencies,
+        error_rate=candidate_stats["error_rate"],
+        slo_target=thresholds.get("slo_target", 0.999),
+    )
+
+    burn_rate_max = thresholds.get("max_error_budget_burn_rate", 14.4)
+    if composite_health["error_budget"]["burn_rate"] >= burn_rate_max:
+        breached_thresholds.append(
+            f"SRE Error Budget Burn Rate ({composite_health['error_budget']['burn_rate']:.1f}x) exceeds critical threshold ({burn_rate_max:.1f}x) — budget exhausted in {composite_health['error_budget']['hours_to_exhaustion']}h"
+        )
+
+    if composite_health["hypothesis_testing"]["is_significant"]:
+        breached_thresholds.append(
+            f"Statistically significant latency regression confirmed by Mann-Whitney U test (p={composite_health['hypothesis_testing']['p_value']:.4f} < {thresholds.get('mann_whitney_u_significance', 0.05)})"
+        )
+
     verdict = "FAIL" if breached_thresholds else "PASS"
 
     deployment_strat_cfg = policy.get("deployment_strategies", {})
@@ -255,6 +280,7 @@ def run_evaluation(
         "revision_name": revision_name,
         "candidate": candidate_stats,
         "stable": stable_stats,
+        "composite_health": composite_health,
         "thresholds": thresholds,
         "breached_thresholds": breached_thresholds,
         "deployment_options": deployment_strat_cfg.get("options", []),
@@ -278,7 +304,12 @@ def run_evaluation(
     print(f"  Candidate Error Rate: {candidate_stats['error_rate']:.2%} | p95: {candidate_stats['p95_ms']}ms")
     if stable_stats:
         print(f"  Stable Error Rate:    {stable_stats['error_rate']:.2%} | p95: {stable_stats['p95_ms']}ms")
+    print(f"  SRE Composite Score:  {composite_health['health_score']}/100 [{composite_health['status']}]")
+    print(f"  Error Budget Burn:    {composite_health['error_budget']['burn_rate']}x ({composite_health['error_budget']['alert_tier']})")
+    if stable_stats:
+        print(f"  Mann-Whitney U Test:  p={composite_health['hypothesis_testing']['p_value']} (Significant: {composite_health['hypothesis_testing']['is_significant']})")
     if breached_thresholds:
+
         if hasattr(sys.stdout, "reconfigure"):
             sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         print("  BREACHES DETECTED (ISSUE):")
@@ -386,7 +417,25 @@ def generate_markdown_report(report: dict[str, Any], output_path: Path) -> None:
         f"",
     ]
 
+    composite = report.get("composite_health", {})
+    if composite:
+        err_budget = composite.get("error_budget", {})
+        mwu = composite.get("hypothesis_testing", {})
+        lines.extend([
+            "## Principal SRE Statistical & Error Budget Telemetry",
+            "",
+            "| SRE Metric | Observed Value | SRE Objective / Threshold | Health Assessment |",
+            "| :--- | :--- | :--- | :--- |",
+            f"| **Composite Health Score** | `{composite.get('health_score', 0)}/100` | `>= 80.0` | `{'✅ PASS' if composite.get('health_score', 0) >= 80 else '❌ DEGRADED'}` |",
+            f"| **Error Budget Burn Rate** | `{err_budget.get('burn_rate', 0)}x` | `< 14.4x (1h) / < 6.0x (6h)` | `{'✅ NORMAL' if err_budget.get('burn_rate', 0) < 14.4 else '🚨 CRITICAL (Page-1)'}` |",
+            f"| **Est. Budget Exhaustion** | `{err_budget.get('hours_to_exhaustion', 0)} hours` | `> 720 hours (1 Month)` | `{'✅ STABLE' if err_budget.get('hours_to_exhaustion', 0) >= 720 else '⚠️ DRAINING'}` |",
+            f"| **Mann-Whitney U Test** | `p = {mwu.get('p_value', 1.0)}` | `p >= 0.05 (Retain H0)` | `{'✅ NO REGRESSION' if not mwu.get('is_significant') else '❌ REGRESSION DETECTED'}` |",
+            f"| **Latency Anomalies (IQR)** | `{composite.get('statistical_anomalies_detected', 0)} detected` | `Z-Score > 2.5` | `{'✅ NOMINAL' if composite.get('statistical_anomalies_detected', 0) == 0 else '⚠️ JITTER'}` |",
+            "",
+        ])
+
     if breaches:
+
         lines.append("## Breached Policy Thresholds")
         for b in breaches:
             lines.append(f"- ⚠️ **{b}**")

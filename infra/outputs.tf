@@ -22,3 +22,14 @@ output "backend_url" {
   description = "Public URL of the Sentinel Backend API"
   value       = google_cloud_run_v2_service.backend.uri
 }
+
+output "global_lb_ip" {
+  description = "Global Anycast Load Balancer IP address"
+  value       = google_compute_global_address.sentinel_lb_ip.address
+}
+
+output "cloud_armor_policy_id" {
+  description = "Cloud Armor WAF Security Policy ID"
+  value       = google_compute_security_policy.sentinel_armor.id
+}
+
