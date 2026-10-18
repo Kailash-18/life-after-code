@@ -37,11 +37,16 @@ resource "google_compute_backend_service" "target_app_backend" {
     group = google_compute_region_network_endpoint_group.target_app_neg.id
   }
 
+  backend {
+    group = google_compute_region_network_endpoint_group.target_app_failover_neg.id
+  }
+
   log_config {
     enable      = true
     sample_rate = 1.0
   }
 }
+
 
 # 3. Backend Service for Sentinel API with Cloud Armor Attachment
 resource "google_compute_backend_service" "sentinel_api_backend" {

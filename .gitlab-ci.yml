@@ -100,6 +100,39 @@ chaos:resilience-simulation:
     paths:
       - artifacts/chaos-resilience-report.json
 
+chaos:multi-region-dr-drill:
+  stage: test
+  image: python:3.11-slim
+  script:
+    - echo "==> Running Multi-Region Zero-Downtime DR Simulation (RTO < 5s, RPO = 0s)"
+    - python sentinel/scripts/disaster_recovery.py
+  artifacts:
+    when: always
+    paths:
+      - artifacts/disaster-recovery-report.json
+
+test:ebpf-kernel-telemetry:
+  stage: test
+  image: python:3.11-slim
+  script:
+    - echo "==> Running L4/L7 eBPF Kernel Transport & TLS Latency Decomposition"
+    - python sentinel/scripts/ebpf_tracer.py --samples 15
+  artifacts:
+    when: always
+    paths:
+      - artifacts/ebpf-telemetry-report.json
+
+test:drift-detection:
+  stage: test
+  image: python:3.11-slim
+  script:
+    - echo "==> Running Statistical EWMA & CUSUM Adaptive Drift Detector"
+    - python sentinel/scripts/drift_detector.py
+  artifacts:
+    when: always
+    paths:
+      - artifacts/drift-analysis-report.json
+
 # ==============================================================================
 # STAGE 3: SECURITY, SAST & SLSA PROVENANCE (Tasks K8, Principal SRE)
 # ==============================================================================
@@ -124,6 +157,29 @@ security:slsa-attestation:
     when: always
     paths:
       - artifacts/attestation-*.json
+
+security:opa-rego-guardrails:
+  stage: security
+  image: python:3.11-slim
+  script:
+    - echo "==> Evaluating Open Policy Agent (OPA) Rego Zero-Trust Guardrails"
+    - python sentinel/scripts/opa_validator.py --output artifacts/opa-compliance-report.json
+  artifacts:
+    when: always
+    paths:
+      - artifacts/opa-compliance-report.json
+
+security:cosign-keyless-verify:
+  stage: security
+  image: python:3.11-slim
+  script:
+    - echo "==> Verifying Sigstore Cosign Keyless Provenance & Rekor Transparency Log"
+    - python sentinel/scripts/cosign_verifier.py --commit-sha "${CI_COMMIT_SHA:-localdev}"
+  artifacts:
+    when: always
+    paths:
+      - artifacts/cosign-verification-report.json
+
 
 
 # ==============================================================================

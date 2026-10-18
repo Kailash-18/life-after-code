@@ -10,6 +10,13 @@ variable "region" {
   default     = "us-central1"
 }
 
+variable "failover_region" {
+  description = "Secondary disaster recovery GCP Region for Active-Active Multi-Region Cloud Run"
+  type        = string
+  default     = "us-east1"
+}
+
+
 variable "environment" {
   description = "Deployment environment (e.g. dev, staging, prod)"
   type        = string

@@ -33,3 +33,14 @@ output "cloud_armor_policy_id" {
   value       = google_compute_security_policy.sentinel_armor.id
 }
 
+output "target_app_failover_url" {
+  description = "Public URL of the Disaster Recovery Target App service in secondary region"
+  value       = google_cloud_run_v2_service.target_app_failover.uri
+}
+
+output "cloud_dns_managed_zone" {
+  description = "Cloud DNS Anycast Managed Zone for multi-region steering"
+  value       = google_dns_managed_zone.sentinel_zone.name
+}
+
+
