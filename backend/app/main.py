@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,15 +9,25 @@ from app.config import settings
 from app.routes.events import router as events_router
 from app.routes.health import router as health_router
 from app.routes.incidents import router as incidents_router
+from app.routes.releases import _ensure_initial_release
 from app.routes.releases import router as releases_router
 from app.routes.status import router as status_router
 from app.routes.webhooks import router as webhooks_router
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    _ensure_initial_release()
+    yield
+
 
 app = FastAPI(
     title=settings.service_name,
     description="Sentinel Backend API for deployment safety, CI event ingestion, and recovery state tracking.",
     version=settings.version,
+    lifespan=lifespan,
 )
+
 
 # CORS setup for Mission Control UI
 app.add_middleware(

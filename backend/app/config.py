@@ -24,5 +24,10 @@ class Settings(BaseSettings):
         "https://sentinel-mission-control.web.app",
     ]
 
+    # Persistence Configuration (sqlite | memory | firestore | postgres)
+    persistence_backend: str = os.getenv("SENTINEL_PERSISTENCE_BACKEND", "sqlite")
+    sqlite_db_path: str = os.getenv("SENTINEL_SQLITE_PATH", "sentinel.db")
+
+
 
 settings = Settings()

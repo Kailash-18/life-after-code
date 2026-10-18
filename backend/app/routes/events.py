@@ -134,8 +134,16 @@ async def ingest_ci_event(
         )
 
     # 4. Idempotency check: key on (job_id, type)
+    from app.models.entities import EventRecord
+    from app.persistence.factory import get_repository
+
+    repo = get_repository()
     idempotency_key = f"{payload.job_id}:{payload.type}"
-    if idempotency_key in PROCESSED_JOB_EVENTS:
+
+    # Use atomic repository idempotency check
+    is_fresh = repo.check_and_set_idempotency(idempotency_key)
+    if not is_fresh or idempotency_key in PROCESSED_JOB_EVENTS:
+        PROCESSED_JOB_EVENTS.add(idempotency_key)
         return {
             "status": "accepted",
             "event_id": f"evt-duplicate-{payload.job_id}",
@@ -165,6 +173,24 @@ async def ingest_ci_event(
     # 5. Evaluate state transition and enforce authoritative sources (Task R4)
     process_event_state_transition(event_record)
 
+    # Persist in repository
+    entity_type = "Incident" if payload.incident_id else "Release"
+    entity_id = payload.incident_id or payload.release_id or payload.pipeline_id
+    repo.save_event(
+        EventRecord(
+            id=event_id,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            type=payload.type,
+            source=payload.source,
+            source_job_id=payload.job_id,
+            at=now_iso,
+            data=payload.data,
+            artifact_url=payload.artifact_url,
+        )
+    )
+
     RECORDED_EVENTS.append(event_record)
 
     return {"status": "accepted", "event_id": event_id, "received_at": now_iso}
+

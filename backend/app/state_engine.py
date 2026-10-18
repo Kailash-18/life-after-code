@@ -2,11 +2,26 @@
 Project Sentinel State Engine.
 Enforces the 11-step recovery loop state machine and authoritative source validation.
 Core principle: AI proposes; deterministic gates decide.
+Integrated with the persistence layer (SentinelRepository).
 """
 
 from typing import Any
 
 from fastapi import HTTPException, status
+
+from app.models.entities import (
+    GateKind,
+    GateResult,
+    GateVerdict,
+    Incident,
+    IncidentStatus,
+    RecoveryAttempt,
+    RecoveryState,
+    TestKind,
+    TestOutcome,
+    TestResult,
+)
+from app.persistence.factory import get_repository
 
 VALID_LIFECYCLE_STATES = [
     "DETECTED",
@@ -45,42 +60,90 @@ ALLOWED_TRANSITIONS = {
     "REDEPLOYING": ["RECOVERED", "REDEPLOY_UNHEALTHY", "ESCALATED"],
 }
 
-# In-memory incident and attempt state storage for Sentinel API
-INCIDENTS_STORE: dict[str, dict[str, Any]] = {}
+class _IncidentsStoreProxy(dict):
+    """Dynamic dict proxy backed by SentinelRepository for backward compatibility."""
+
+    def __getitem__(self, key: str):
+        inc = get_repository().get_incident(key)
+        if inc is not None:
+            return inc.model_dump()
+        return super().__getitem__(key)
+
+    def __contains__(self, key: object):
+        if isinstance(key, str) and get_repository().get_incident(key) is not None:
+            return True
+        return super().__contains__(key)
+
+    def get(self, key: str, default=None):
+        inc = get_repository().get_incident(key)
+        if inc is not None:
+            return inc.model_dump()
+        return super().get(key, default)
+
+    def values(self):
+        repo_incs = get_repository().list_incidents()
+        if repo_incs:
+            return [inc.model_dump() for inc in repo_incs]
+        return super().values()
+
+
+INCIDENTS_STORE: dict[str, dict[str, Any]] = _IncidentsStoreProxy()
+
+
+def _sync_to_legacy_dict(incident: Incident) -> dict[str, Any]:
+    """Sync an Incident domain model to the legacy dict representation."""
+    d = incident.model_dump()
+    dict.__setitem__(INCIDENTS_STORE, incident.id, d)
+    return d
+
 
 
 def get_or_create_incident(
     incident_id: str, release_id: str | None = None, data: dict[str, Any] | None = None
 ) -> dict[str, Any]:
-    if incident_id not in INCIDENTS_STORE:
-        INCIDENTS_STORE[incident_id] = {
-            "id": incident_id,
-            "release_id": release_id or "rel-unknown",
-            "status": "DETECTED",
-            "detected_at": data.get("detected_at") if data else None,
-            "breached_thresholds": (data.get("breached_thresholds") if data else [])
-            or [],
-            "evidence_bundle_ref": data.get("evidence_bundle_ref") if data else None,
-            "evidence_sha256": data.get("evidence_sha256") if data else None,
-            "recovery_attempts": [
-                {
-                    "id": f"att-{incident_id}-1",
-                    "incident_id": incident_id,
-                    "attempt_no": 1,
-                    "state": "DETECTED",
-                    "test_results": [],
-                    "gate_results": [],
-                }
-            ],
-        }
-    return INCIDENTS_STORE[incident_id]
+    repo = get_repository()
+    existing = repo.get_incident(incident_id)
+    if existing:
+        return _sync_to_legacy_dict(existing)
+
+    # Create new incident
+    rel_id = release_id or "rel-unknown"
+    breached = (data.get("breached_thresholds") if data else []) or []
+    if isinstance(breached, list) and breached and isinstance(breached[0], dict):
+        import json
+
+        breached = [json.dumps(b) for b in breached]
+
+    new_inc = Incident(
+        id=incident_id,
+        release_id=rel_id,
+        status=IncidentStatus.DETECTED,
+        detected_at=data.get("detected_at") if data and data.get("detected_at") else None or "",
+        breached_thresholds=breached,
+        evidence_bundle_ref=data.get("evidence_bundle_ref") if data else None,
+        evidence_sha256=data.get("evidence_sha256") if data else None,
+        recovery_attempts=[
+            RecoveryAttempt(
+                id=f"att-{incident_id}-1",
+                incident_id=incident_id,
+                attempt_no=1,
+                state=RecoveryState.DETECTED,
+                test_results=[],
+                gate_results=[],
+            )
+        ],
+    )
+    repo.save_incident(new_inc)
+    return _sync_to_legacy_dict(new_inc)
 
 
 def process_event_state_transition(event: dict[str, Any]) -> dict[str, Any] | None:
     """
     Evaluates an ingested CI event against authoritative source rules
     and enforces state machine progression without skipping states.
+    Persists updates via SentinelRepository.
     """
+    repo = get_repository()
     event_type = event.get("type")
     source = event.get("source", "")
     incident_id = event.get("incident_id")
@@ -91,23 +154,30 @@ def process_event_state_transition(event: dict[str, Any]) -> dict[str, Any] | No
         event["incident_id"] = incident_id
 
     if not incident_id:
-        # Non-incident event (e.g. general pipeline or deploy without incident)
         return None
 
-    incident = get_or_create_incident(
-        incident_id, release_id=event.get("release_id"), data=data
-    )
-    current_status = incident["status"]
+    # Fetch incident from persistence layer
+    inc_model = repo.get_incident(incident_id)
+    if not inc_model:
+        get_or_create_incident(
+            incident_id, release_id=event.get("release_id"), data=data
+        )
+        inc_model = repo.get_incident(incident_id)
+
+    if not inc_model:
+        return None
+
+    current_status = inc_model.status.value
     target_status = None
 
     # Map events to target status and check authoritative sources
     if event_type == "incident.detected":
         target_status = "DETECTED"
         if data.get("breached_thresholds"):
-            incident["breached_thresholds"] = data["breached_thresholds"]
+            inc_model.breached_thresholds = data["breached_thresholds"]
         if event.get("artifact_url"):
-            incident["evidence_bundle_ref"] = event.get("artifact_url")
-            incident["evidence_sha256"] = data.get("evidence_sha256")
+            inc_model.evidence_bundle_ref = event.get("artifact_url")
+            inc_model.evidence_sha256 = data.get("evidence_sha256")
 
     elif event_type == "rollback.completed":
         # Authoritative: Rollback job + post-rollback probe
@@ -117,23 +187,21 @@ def process_event_state_transition(event: dict[str, Any]) -> dict[str, Any] | No
     elif event_type == "evidence.collected":
         target_status = "EVIDENCE_COLLECTED"
         if event.get("artifact_url"):
-            incident["evidence_bundle_ref"] = event.get("artifact_url")
+            inc_model.evidence_bundle_ref = event.get("artifact_url")
         if data.get("evidence_sha256"):
-            incident["evidence_sha256"] = data.get("evidence_sha256")
+            inc_model.evidence_sha256 = data.get("evidence_sha256")
 
     elif event_type == "flow.started":
         target_status = "INVESTIGATING"
-        if data.get("flow_session_id") and incident["recovery_attempts"]:
-            incident["recovery_attempts"][-1]["flow_session_id"] = data[
-                "flow_session_id"
-            ]
+        if data.get("flow_session_id") and inc_model.recovery_attempts:
+            inc_model.recovery_attempts[-1].flow_session_id = data["flow_session_id"]
 
     elif event_type == "repair.proposed":
         target_status = "REPAIR_PROPOSED"
-        if incident["recovery_attempts"]:
-            att = incident["recovery_attempts"][-1]
-            att["mr_iid"] = data.get("mr_iid")
-            att["fix_sha"] = data.get("fix_sha")
+        if inc_model.recovery_attempts:
+            att = inc_model.recovery_attempts[-1]
+            att.mr_iid = data.get("mr_iid")
+            att.fix_sha = data.get("fix_sha")
 
     elif event_type in ("regression_proof.verdict", "integrity_gate.verdict"):
         verdict = data.get("verdict", "").upper()
@@ -141,28 +209,30 @@ def process_event_state_transition(event: dict[str, Any]) -> dict[str, Any] | No
             target_status = "VERIFICATION_FAILED"
         else:
             target_status = "VERIFYING"
-        if incident["recovery_attempts"]:
-            att = incident["recovery_attempts"][-1]
+        if inc_model.recovery_attempts:
+            att = inc_model.recovery_attempts[-1]
             if event_type == "integrity_gate.verdict":
-                att["gate_results"].append(
-                    {
-                        "id": f"gte-{event.get('job_id')}",
-                        "attempt_id": att["id"],
-                        "gate": "integrity",
-                        "verdict": verdict.lower(),
-                        "findings": data.get("findings", []),
-                        "report_ref": event.get("artifact_url"),
-                    }
+                gr_verdict = GateVerdict.PASS if verdict == "PASS" else GateVerdict.FAIL
+                att.gate_results.append(
+                    GateResult(
+                        id=f"gte-{event.get('job_id')}",
+                        attempt_id=att.id,
+                        gate=GateKind.INTEGRITY,
+                        verdict=gr_verdict,
+                        findings=data.get("findings", []),
+                        report_ref=event.get("artifact_url"),
+                    )
                 )
             else:
-                att["test_results"].append(
-                    {
-                        "id": f"tst-{event.get('job_id')}",
-                        "attempt_id": att["id"],
-                        "kind": data.get("kind", "regression_on_fix"),
-                        "sha": event.get("commit_sha"),
-                        "outcome": verdict,
-                    }
+                tr_outcome = TestOutcome.PASSED if verdict == "PASS" else TestOutcome.FAILED
+                att.test_results.append(
+                    TestResult(
+                        id=f"tst-{event.get('job_id')}",
+                        attempt_id=att.id,
+                        kind=TestKind.REGRESSION_ON_FIX,
+                        sha=event.get("commit_sha", ""),
+                        outcome=tr_outcome,
+                    )
                 )
 
     elif event_type == "merge.completed":
@@ -196,7 +266,8 @@ def process_event_state_transition(event: dict[str, Any]) -> dict[str, Any] | No
             target_status = "REDEPLOY_UNHEALTHY"
 
     if not target_status or target_status == current_status:
-        return incident
+        repo.save_incident(inc_model)
+        return _sync_to_legacy_dict(inc_model)
 
     # Enforce state machine transitions: no skipped states
     allowed_next_states = ALLOWED_TRANSITIONS.get(current_status, [])
@@ -212,13 +283,18 @@ def process_event_state_transition(event: dict[str, Any]) -> dict[str, Any] | No
             },
         )
 
-    # Transition state
-    incident["status"] = target_status
-    if incident["recovery_attempts"]:
-        incident["recovery_attempts"][-1]["state"] = target_status
+    # Transition state and persist
+    inc_model.status = IncidentStatus(target_status)
+    if inc_model.recovery_attempts:
+        inc_model.recovery_attempts[-1].state = (
+            RecoveryState(target_status)
+            if target_status in RecoveryState._value2member_map_
+            else RecoveryState.FAILED
+        )
         if target_status in TERMINAL_FAILURE_STATES:
-            incident["recovery_attempts"][-1]["failure_reason"] = data.get(
+            inc_model.recovery_attempts[-1].failure_reason = data.get(
                 "reason", f"Failed with {target_status}"
             )
 
-    return incident
+    repo.save_incident(inc_model)
+    return _sync_to_legacy_dict(inc_model)

@@ -57,3 +57,10 @@ dist/
 # OS
 .DS_Store
 Thumbs.db
+
+# Databases & local state
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
