@@ -16,12 +16,12 @@ resource "google_iam_workload_identity_pool_provider" "gitlab_provider" {
   description                        = "OIDC identity provider mapping GitLab ID tokens"
 
   attribute_mapping = {
-    "google.subject"             = "assertion.sub"
-    "attribute.aud"              = "assertion.aud"
-    "attribute.project_path"     = "assertion.project_path"
-    "attribute.project_id"       = "assertion.project_id"
-    "attribute.ref"              = "assertion.ref"
-    "attribute.ref_type"         = "assertion.ref_type"
+    "google.subject"              = "assertion.sub"
+    "attribute.aud"               = "assertion.aud"
+    "attribute.project_path"      = "assertion.project_path"
+    "attribute.project_id"        = "assertion.project_id"
+    "attribute.ref"               = "assertion.ref"
+    "attribute.ref_type"          = "assertion.ref_type"
     "attribute.ci_config_ref_uri" = "assertion.ci_config_ref_uri"
   }
 

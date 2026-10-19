@@ -15,8 +15,8 @@ resource "google_cloud_run_v2_service" "target_app" {
       }
       resources {
         limits = {
-          cpu    = "1000m"
-          memory = "512Mi"
+          cpu    = var.target_app_cpu
+          memory = var.target_app_memory
         }
       }
       env {
@@ -25,8 +25,8 @@ resource "google_cloud_run_v2_service" "target_app" {
       }
     }
     scaling {
-      min_instance_count = 1
-      max_instance_count = 5
+      min_instance_count = var.target_app_min_instances
+      max_instance_count = var.target_app_max_instances
     }
   }
 
@@ -64,8 +64,8 @@ resource "google_cloud_run_v2_service" "backend" {
       }
       resources {
         limits = {
-          cpu    = "1000m"
-          memory = "512Mi"
+          cpu    = var.backend_cpu
+          memory = var.backend_memory
         }
       }
       env {
@@ -83,8 +83,8 @@ resource "google_cloud_run_v2_service" "backend" {
       }
     }
     scaling {
-      min_instance_count = 1
-      max_instance_count = 3
+      min_instance_count = var.backend_min_instances
+      max_instance_count = var.backend_max_instances
     }
   }
 

@@ -3,7 +3,9 @@
 # Referenced by Sentinel Health Evaluator (sentinel/scripts/evaluator.py) and Deployment Controller.
 
 version: "1.0"
-service: "sentinel-target-app"
+service: "${TARGET_APP_SERVICE:-sentinel-target-app}"
+environment: "${SENTINEL_ENV:-prod}"
+
 
 # ==============================================================================
 # DEPLOYMENT STRATEGIES & POST-INCIDENT RECOMMENDATIONS
@@ -124,6 +126,12 @@ thresholds:
   # Comparison against stable baseline
   max_error_rate_delta: 0.01        # Candidate error rate cannot exceed stable by more than 1.0 percentage points
   max_latency_ratio: 1.30           # Candidate p95 latency cannot exceed stable p95 by more than 30%
+
+  # SRE Error Budget & Statistical Hypothesis Testing (Principal SRE Tier)
+  slo_target: 0.999                 # 99.9% availability SLO (0.1% allowable failure budget)
+  max_error_budget_burn_rate: 14.4  # SRE Multi-Window Multi-Burn-Rate 1-hour exhaustion threshold (Page-1)
+  mann_whitney_u_significance: 0.05 # Non-parametric p-value confidence limit for certifying latency degradation
+
 
 # Synthetic probe configuration
 probe:
