@@ -16,8 +16,9 @@ resource "google_secret_manager_secret" "hmac_secret" {
 
 resource "google_secret_manager_secret_version" "hmac_secret_initial" {
   secret      = google_secret_manager_secret.hmac_secret.id
-  secret_data = "hackathon-transcend-sentinel-key-2026"
+  secret_data = var.initial_hmac_secret
 }
+
 
 # Grant backend service account permission to access the secret
 resource "google_secret_manager_secret_iam_member" "backend_hmac_access" {
