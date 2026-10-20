@@ -1,15 +1,15 @@
 from app.routes.events import RECORDED_EVENTS
 from app.state_engine import INCIDENTS_STORE
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 
 router = APIRouter(prefix="/api/v1/incidents", tags=["incidents"])
 
 
 @router.get("")
-async def list_incidents(status: str | None = None):
+async def list_incidents(status_filter: str | None = Query(None, alias="status")):
     results = list(INCIDENTS_STORE.values())
-    if status:
-        results = [inc for inc in results if inc.get("status") == status]
+    if status_filter:
+        results = [inc for inc in results if inc.get("status") == status_filter]
     return results
 
 

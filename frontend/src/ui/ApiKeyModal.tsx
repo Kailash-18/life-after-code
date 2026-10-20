@@ -61,7 +61,18 @@ export function ApiKeyModal({ open, onClose }: ApiKeyModalProps) {
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(key);
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(key);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = key;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
       setCopied(true);
       bus.pulse(0.5);
       setTimeout(() => setCopied(false), 2000);

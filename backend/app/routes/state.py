@@ -4,6 +4,8 @@ Exposes endpoints for point-in-time state snapshotting, S3 cryptographic verific
 historical snapshot exploration, and state restoration.
 """
 
+import logging
+import os
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
@@ -11,6 +13,8 @@ from pydantic import BaseModel, Field
 
 from app.s3_state_store import s3_state_store
 from app.state_engine import INCIDENTS_STORE
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/state", tags=["State Storage"])
 
@@ -118,13 +122,14 @@ async def rollback_state_snapshot(req: StateRollbackRequest | None = None) -> di
 
         rb_res = execute_rollback(
             service_name=request_data.service_name,
+            stable_url=os.getenv("SENTINEL_STABLE_URL", "http://localhost:8080"),
             s3_snapshot_id=snapshot_id,
             dry_run=request_data.dry_run,
             emit_to_backend=False,
         )
         restored_rev = rb_res.get("restored_revision", restored_rev)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Rollback traffic shift attempt encountered error: %s", e)
 
     return {
         "status": "SUCCESS",

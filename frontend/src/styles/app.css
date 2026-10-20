@@ -766,4 +766,9 @@ button.stat:hover { transform: translateY(-5px); }
   .ladder { flex-direction: column; }
   .rule { height: 270px; }
 }
+.link__keytext-short { display: none; }
+@media (max-width: 680px) {
+  .link__keytext-full { display: none; }
+  .link__keytext-short { display: inline; }
+}
 @media (prefers-reduced-motion: reduce) { .route { animation: none; } .rule__inner { transition: none; } }

@@ -114,7 +114,7 @@ def run_post_rollback_probe(
 
 def execute_rollback(
     service_name: str,
-    stable_url: str,
+    stable_url: str = "http://localhost:8080",
     known_good_rev: str | None = None,
     candidate_rev: str = "rev-candidate-001",
     region: str = "us-central1",

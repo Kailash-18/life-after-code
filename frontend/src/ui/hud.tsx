@@ -111,7 +111,8 @@ export function TopBar({ mode, onMenu }: { mode: SceneMode; onMenu: () => void }
             }}
           >
             <span aria-hidden="true" style={{ fontSize: '12px' }}>🔑</span>
-            <span>API KEY: {apiKey.length > 14 ? `${apiKey.slice(0, 10)}…${apiKey.slice(-4)}` : apiKey}</span>
+            <span className="link__keytext-full">API KEY: {apiKey.length > 14 ? `${apiKey.slice(0, 10)}…${apiKey.slice(-4)}` : apiKey}</span>
+            <span className="link__keytext-short">KEY</span>
           </button>
           <div className={`link link--${linkState}`} role="status" title={source === 'live' ? `API: ${API_BASE || location.origin}` : 'Scripted demo data'}>
             <i aria-hidden="true" /> <span className="link__t">{linkText}</span>

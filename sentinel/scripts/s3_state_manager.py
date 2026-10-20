@@ -314,7 +314,7 @@ class S3StateManager:
             known_good_rev=rev_name,
             s3_snapshot_id=snapshot_id,
             dry_run=dry_run,
-            emit_to_backend=True,
+            emit_to_backend=not dry_run,
         )
 
         rollback_report["s3_snapshot_id"] = snapshot_id
