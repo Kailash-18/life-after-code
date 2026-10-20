@@ -10,6 +10,9 @@ class Settings(BaseSettings):
     port: int = int(os.getenv("PORT", "8000"))
 
     # Secrets (configured via Secret Manager or masked CI vars)
+    api_key: str = os.getenv(
+        "SENTINEL_API_KEY", "sk-sentinel-live-9f8a2b3c4d5e"
+    )
     hmac_secret: str = os.getenv(
         "SENTINEL_HMAC_SECRET", "sentinel-dev-secret-key-change-in-prod"
     )

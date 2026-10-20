@@ -1,8 +1,9 @@
-import { useState } from 'react';
-import { API_BASE, GITLAB_URL, rollbackToS3Snapshot } from '../api/client';
+import { useEffect, useState } from 'react';
+import { API_BASE, GITLAB_URL, getApiKey, rollbackToS3Snapshot } from '../api/client';
 import type { S3RollbackResult } from '../api/types';
 import { useSentinel } from '../api/source';
 import { useMission } from '../state/mission';
+import { ApiKeyModal } from '../ui/ApiKeyModal';
 import { MagButton, Tilt } from '../ui/fx';
 import { Chip, PageHead, SecHead, ago } from '../ui/kit';
 
@@ -38,6 +39,7 @@ const AUTHORITY: [string, string][] = [
   ['Merge', 'Required CI jobs'],
   ['RECOVERED', 'The post-redeploy evaluator'],
   ['Infrastructure & Incident State', 'AWS S3 Remote State Plane (KMS CMK Encrypted & Versioned)'],
+  ['API Authentication & Access', 'Sentinel Key Vault (Bearer Token & X-API-Key)'],
 ];
 
 
@@ -46,6 +48,18 @@ export default function System() {
   const { now } = useMission();
   const [rollingBack, setRollingBack] = useState(false);
   const [rollbackResult, setRollbackResult] = useState<S3RollbackResult | null>(null);
+  const [currentApiKey, setCurrentApiKey] = useState(getApiKey());
+  const [apiKeyModalOpen, setApiKeyModalOpen] = useState(false);
+  const [apiKeyRevealed, setApiKeyRevealed] = useState(false);
+
+  useEffect(() => {
+    const onKeyChange = (e: Event) => {
+      const customEvent = e as CustomEvent<{ apiKey: string }>;
+      if (customEvent.detail?.apiKey) setCurrentApiKey(customEvent.detail.apiKey);
+    };
+    window.addEventListener('sentinel:apikey:changed', onKeyChange);
+    return () => window.removeEventListener('sentinel:apikey:changed', onKeyChange);
+  }, []);
 
   const handleRollback = async () => {
     setRollingBack(true);
@@ -108,7 +122,37 @@ export default function System() {
               </p>
             )}
           </Tilt>
+          <Tilt className="card" max={8}>
+            <span className="card__k">API Key & Access Credentials</span>
+            <b className="syslink__word tone-ok">AUTHENTICATED</b>
+            <p className="muted small">Header: <code>X-API-Key</code> / <code>Bearer</code></p>
+            <p className="muted small">
+              Key: <code>{apiKeyRevealed ? currentApiKey : (currentApiKey.length > 14 ? `${currentApiKey.slice(0, 10)}••••${currentApiKey.slice(-4)}` : '••••••••••••')}</code>
+            </p>
+            <div className="syslink__cta" style={{ marginTop: '0.6rem', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              <MagButton variant="ghost" onClick={() => setApiKeyModalOpen(true)} cursor="Key">
+                Manage API Key
+              </MagButton>
+              <button
+                onClick={() => setApiKeyRevealed(!apiKeyRevealed)}
+                style={{
+                  padding: '6px 12px',
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  border: '1px solid var(--line)',
+                  borderRadius: '999px',
+                  fontSize: '11px',
+                  fontFamily: 'var(--mono)',
+                  color: 'var(--ink-2)',
+                  cursor: 'pointer',
+                }}
+              >
+                {apiKeyRevealed ? 'Hide' : 'Reveal'}
+              </button>
+            </div>
+          </Tilt>
         </div>
+
+        <ApiKeyModal open={apiKeyModalOpen} onClose={() => setApiKeyModalOpen(false)} />
 
         {source === 'live' && (
           <div className="tablewrap" data-reveal>

@@ -11,6 +11,44 @@ import type {
 export const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/$/, '') ?? '';
 export const GITLAB_URL = (import.meta.env.VITE_GITLAB_PROJECT_URL as string | undefined)?.replace(/\/$/, '') ?? '';
 
+export const STORAGE_API_KEY = 'sentinel_api_key';
+export const DEFAULT_SENTINEL_API_KEY = (import.meta.env.VITE_SENTINEL_API_KEY as string | undefined) || 'sk-sentinel-live-9f8a2b3c4d5e';
+
+export function getApiKey(): string {
+  try {
+    return localStorage.getItem(STORAGE_API_KEY) || DEFAULT_SENTINEL_API_KEY;
+  } catch {
+    return DEFAULT_SENTINEL_API_KEY;
+  }
+}
+
+export function setApiKey(key: string): void {
+  try {
+    localStorage.setItem(STORAGE_API_KEY, key.trim());
+    window.dispatchEvent(new CustomEvent('sentinel:apikey:changed', { detail: { apiKey: key.trim() } }));
+  } catch {
+    // fallback
+  }
+}
+
+export function resetApiKey(): void {
+  try {
+    localStorage.removeItem(STORAGE_API_KEY);
+    window.dispatchEvent(new CustomEvent('sentinel:apikey:changed', { detail: { apiKey: DEFAULT_SENTINEL_API_KEY } }));
+  } catch {
+    // fallback
+  }
+}
+
+export function generateRandomApiKey(): string {
+  const chars = '0123456789abcdef';
+  let rand = '';
+  for (let i = 0; i < 32; i++) {
+    rand += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return `sk-sentinel-rot-${rand.slice(0, 16)}`;
+}
+
 export class ApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -24,7 +62,13 @@ export async function getJSON(path: string, signal?: AbortSignal): Promise<unkno
   const timer = setTimeout(() => ctrl.abort(), 8000);
   signal?.addEventListener('abort', () => ctrl.abort());
   try {
-    const res = await fetch(`${API_BASE}${path}`, { signal: ctrl.signal, headers: { Accept: 'application/json' } });
+    const key = getApiKey();
+    const headers: Record<string, string> = { Accept: 'application/json' };
+    if (key) {
+      headers['X-API-Key'] = key;
+      headers['Authorization'] = `Bearer ${key}`;
+    }
+    const res = await fetch(`${API_BASE}${path}`, { signal: ctrl.signal, headers });
     if (!res.ok) throw new ApiError(res.status, `${res.status} ${res.statusText}`);
     const type = res.headers.get('content-type') ?? '';
     if (!type.includes('json')) throw new ApiError(502, 'The API did not answer with JSON');
@@ -42,13 +86,19 @@ export async function postJSON(path: string, body?: unknown, signal?: AbortSigna
   const timer = setTimeout(() => ctrl.abort(), 10000);
   signal?.addEventListener('abort', () => ctrl.abort());
   try {
+    const key = getApiKey();
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    };
+    if (key) {
+      headers['X-API-Key'] = key;
+      headers['Authorization'] = `Bearer ${key}`;
+    }
     const res = await fetch(`${API_BASE}${path}`, {
       method: 'POST',
       signal: ctrl.signal,
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      },
+      headers,
       body: body ? JSON.stringify(body) : undefined,
     });
     if (!res.ok) throw new ApiError(res.status, `${res.status} ${res.statusText}`);

@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { API_BASE } from '../api/client';
+import { API_BASE, getApiKey } from '../api/client';
 import { useSentinel, type Reading } from '../api/source';
 import { bus } from '../state/bus';
 import { MODE_COLOR, isFailure, type SceneMode } from '../state/derive';
+import { ApiKeyModal } from './ApiKeyModal';
 import { PAGES } from './palette';
 import { MagButton } from './fx';
 
@@ -46,7 +47,26 @@ function ago(ms: number) {
 export function TopBar({ mode, onMenu }: { mode: SceneMode; onMenu: () => void }) {
   const { source, connected, lastOkAt, stale, snap } = useSentinel();
   const [now, setNow] = useState(Date.now());
+  const [apiKey, setLocalApiKey] = useState(getApiKey());
+  const [apiKeyModalOpen, setApiKeyModalOpen] = useState(false);
+
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
+
+  useEffect(() => {
+    const handleKeyChange = (e: Event) => {
+      const customEvent = e as CustomEvent<{ apiKey: string }>;
+      if (customEvent.detail?.apiKey) setLocalApiKey(customEvent.detail.apiKey);
+    };
+    const handleOpenModal = () => setApiKeyModalOpen(true);
+
+    window.addEventListener('sentinel:apikey:changed', handleKeyChange);
+    window.addEventListener('sentinel:open:apikey:modal', handleOpenModal);
+    return () => {
+      window.removeEventListener('sentinel:apikey:changed', handleKeyChange);
+      window.removeEventListener('sentinel:open:apikey:modal', handleOpenModal);
+    };
+  }, []);
+
   const linkState = source === 'demo' ? 'demo' : connected === null ? 'linking' : !connected ? 'offline' : stale ? 'stale' : 'live';
   const linkText = {
     demo: 'Demo scenario', linking: 'Linking…', offline: 'API offline',
@@ -54,28 +74,55 @@ export function TopBar({ mode, onMenu }: { mode: SceneMode; onMenu: () => void }
   }[linkState];
   const open = (snap.incidents ?? []).filter((i) => i.status !== 'RECOVERED' && !isFailure(i.status)).length;
   return (
-    <header className="top" style={{ ['--mode' as string]: MODE_COLOR[mode] }}>
-      <NavLink to="/" className="brand" data-cursor="Home" end>
-        <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 3 28 10v12L16 29 4 22V10z" /><circle cx="16" cy="16" r="4.5" /></svg>
-        <span>SENTINEL</span>
-      </NavLink>
-      <nav className="top__nav" aria-label="Pages">
-        {PAGES.map((p) => (
-          <NavLink key={p.to} to={p.to} end={p.to === '/'} className={({ isActive }) => `navl${isActive ? ' is-on' : ''}`} data-cursor={p.label}>
-            {p.to === '/' ? 'Mission' : p.label}
-            {p.to === '/incidents' && open > 0 && <span className="navl__badge">{open}</span>}
-          </NavLink>
-        ))}
-      </nav>
-      <div className="top__right">
-        <div className={`link link--${linkState}`} role="status" title={source === 'live' ? `API: ${API_BASE || location.origin}` : 'Scripted demo data'}>
-          <i aria-hidden="true" /> <span className="link__t">{linkText}</span>
+    <>
+      <header className="top" style={{ ['--mode' as string]: MODE_COLOR[mode] }}>
+        <NavLink to="/" className="brand" data-cursor="Home" end>
+          <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 3 28 10v12L16 29 4 22V10z" /><circle cx="16" cy="16" r="4.5" /></svg>
+          <span>SENTINEL</span>
+        </NavLink>
+        <nav className="top__nav" aria-label="Pages">
+          {PAGES.map((p) => (
+            <NavLink key={p.to} to={p.to} end={p.to === '/'} className={({ isActive }) => `navl${isActive ? ' is-on' : ''}`} data-cursor={p.label}>
+              {p.to === '/' ? 'Mission' : p.label}
+              {p.to === '/incidents' && open > 0 && <span className="navl__badge">{open}</span>}
+            </NavLink>
+          ))}
+        </nav>
+        <div className="top__right">
+          <button
+            className="link link--key"
+            onClick={() => setApiKeyModalOpen(true)}
+            data-cursor="Key"
+            title="Sentinel API Key Credentials (Click to view or rotate)"
+            style={{
+              background: 'rgba(60, 240, 255, 0.08)',
+              border: '1px solid rgba(60, 240, 255, 0.28)',
+              padding: '6px 14px',
+              borderRadius: '999px',
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              font: '600 11px/1 var(--mono)',
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+              color: 'var(--cyan)',
+              boxShadow: '0 0 14px -6px var(--cyan)',
+            }}
+          >
+            <span aria-hidden="true" style={{ fontSize: '12px' }}>🔑</span>
+            <span>API KEY: {apiKey.length > 14 ? `${apiKey.slice(0, 10)}…${apiKey.slice(-4)}` : apiKey}</span>
+          </button>
+          <div className={`link link--${linkState}`} role="status" title={source === 'live' ? `API: ${API_BASE || location.origin}` : 'Scripted demo data'}>
+            <i aria-hidden="true" /> <span className="link__t">{linkText}</span>
+          </div>
+          <button className="kbtn" onClick={onMenu} data-cursor="Menu" aria-label="Open the command palette">
+            <span className="kbtn__k">⌘K</span><span className="kbtn__m" aria-hidden="true"><i /><i /><i /></span>
+          </button>
         </div>
-        <button className="kbtn" onClick={onMenu} data-cursor="Menu" aria-label="Open the command palette">
-          <span className="kbtn__k">⌘K</span><span className="kbtn__m" aria-hidden="true"><i /><i /><i /></span>
-        </button>
-      </div>
-    </header>
+      </header>
+      <ApiKeyModal open={apiKeyModalOpen} onClose={() => setApiKeyModalOpen(false)} />
+    </>
   );
 }
 

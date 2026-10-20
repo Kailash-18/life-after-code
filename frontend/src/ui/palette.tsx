@@ -26,6 +26,7 @@ export function Palette({ open, onClose }: { open: boolean; onClose: () => void 
   const cmds = useMemo<Cmd[]>(() => [
     ...PAGES.map((p) => ({ id: p.to, label: p.label, hint: p.hint, group: 'Go to', run: () => nav(p.to) })),
     ...(snap.incidents ?? []).map((i) => ({ id: `inc-${i.id}`, label: i.id, hint: statusWord(i.status), group: 'Incident room', run: () => nav(`/incidents/${encodeURIComponent(i.id)}`) })),
+    { id: 'auth-key', label: 'Manage API Key Credentials', hint: 'view, rotate, or test API authentication key', group: 'Security', run: () => window.dispatchEvent(new CustomEvent('sentinel:open:apikey:modal')) },
     { id: 'demo-ok', label: 'Play the demo incident', hint: 'success path · scripted', group: 'Demo', run: () => startDemo(false) },
     { id: 'demo-fail', label: 'Play the failure path', hint: 'gates block the repair · scripted', group: 'Demo', run: () => startDemo(true) },
     ...(source === 'demo' ? [{ id: 'demo-exit', label: 'Exit demo, use the live API', hint: 'live', group: 'Demo', run: exitDemo }] : []),
