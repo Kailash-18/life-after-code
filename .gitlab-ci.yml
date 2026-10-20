@@ -208,6 +208,20 @@ infra:terraform-validate:
     - changes:
         - infra/**/*
 
+infra:s3-state-audit:
+  stage: infra
+  image: python:3.11-slim
+  before_script:
+    - pip install boto3 botocore
+  script:
+    - echo "==> Running Enterprise S3 Remote State & DynamoDB Distributed Lock Audit"
+    - python sentinel/scripts/s3_state_manager.py audit
+  artifacts:
+    when: always
+    paths:
+      - artifacts/s3-state-audit-report.json
+
+
 # ==============================================================================
 # STAGE 5: CANARY DEPLOYMENT (Task K4)
 # ==============================================================================

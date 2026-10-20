@@ -35,9 +35,9 @@ def test_full_recovery_simulation_loop():
             for k, v in req.header_items():
                 headers[k] = v
         data = req.data
-        
+
         path = url.split("http://localhost:8000")[-1]
-        
+
         response = client.request(
             method=method,
             url=path,
@@ -46,7 +46,7 @@ def test_full_recovery_simulation_loop():
         )
         if response.status_code not in (200, 202):
             print(f"DEBUG {method} {path} -> {response.status_code}: {response.text}")
-        
+
         class MockResponse:
             def __init__(self, r):
                 self.status = r.status_code
@@ -57,7 +57,7 @@ def test_full_recovery_simulation_loop():
                 return self
             def __exit__(self, *args):
                 pass
-                
+
         return MockResponse(response)
 
     with patch("urllib.request.urlopen", side_effect=mock_urlopen):

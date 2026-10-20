@@ -174,3 +174,25 @@ export interface DisasterRecoveryStatus {
   status: 'OPTIMAL' | 'DEGRADED';
 }
 
+export interface S3StorageStatus {
+  storage_type: string;
+  bucket_name: string;
+  region: string;
+  prefix: string;
+  s3_connected: boolean;
+  encryption: {
+    algorithm: string;
+    kms_key_id: string | null;
+    bucket_key_enabled: boolean;
+  };
+  distributed_locking: {
+    table_name: string;
+    status: string;
+  };
+  versioning_enabled: boolean;
+  last_sync_timestamp: string | null;
+  total_snapshots_recorded: number;
+  health: string;
+}
+
+

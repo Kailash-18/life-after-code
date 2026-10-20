@@ -19,6 +19,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from sentinel.scripts.emit_event import emit_event
 
 # High-risk patterns for Python codebase
@@ -122,13 +126,13 @@ def run_sast_scan(
     blocking_findings = [f for f in all_findings if f["severity"] in ("CRITICAL", "HIGH")]
     verdict = "FAIL" if blocking_findings else "PASS"
 
-    print(f"\n=======================================================")
+    print("\n=======================================================")
     print(f"  SENTINEL SAST GATE VERDICT: [{verdict}]")
     print(f"  Files Scanned: {files_scanned} | Total Findings: {len(all_findings)}")
     print(f"  Blocking (High/Critical): {len(blocking_findings)}")
     for f in all_findings:
         print(f"    - [{f['severity']}] {f['file']}:{f.get('line', '?')} - {f['message']}")
-    print(f"=======================================================\n")
+    print("=======================================================\n")
 
     report = {
         "timestamp": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),

@@ -23,7 +23,7 @@ def test_deployment_strategies_options_and_recommendation():
     strat_cfg = policy["deployment_strategies"]
     assert strat_cfg["recommended"] == "canary_progressive"
     assert "rationale" in strat_cfg
-    
+
     options = strat_cfg["options"]
     option_ids = [opt["id"] for opt in options]
     assert "canary_progressive" in option_ids

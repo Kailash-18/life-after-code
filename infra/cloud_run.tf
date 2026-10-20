@@ -5,7 +5,7 @@
 resource "google_cloud_run_v2_service" "target_app" {
   name     = "sentinel-target-app"
   location = var.region
-  ingress  = "INGRESS_TRAFFIC_ALL"
+  ingress  = var.cloud_run_ingress
 
   template {
     containers {
@@ -42,8 +42,9 @@ resource "google_cloud_run_v2_service" "target_app" {
   }
 }
 
-# Allow public invocations for hackathon demonstration
+# Configurable public invocations (can be disabled in zero-trust production)
 resource "google_cloud_run_service_iam_member" "target_app_public_access" {
+  count    = var.allow_unauthenticated_invocations ? 1 : 0
   location = google_cloud_run_v2_service.target_app.location
   service  = google_cloud_run_v2_service.target_app.name
   role     = "roles/run.invoker"
@@ -54,7 +55,7 @@ resource "google_cloud_run_service_iam_member" "target_app_public_access" {
 resource "google_cloud_run_v2_service" "backend" {
   name     = "sentinel-backend"
   location = var.region
-  ingress  = "INGRESS_TRAFFIC_ALL"
+  ingress  = var.cloud_run_ingress
 
   template {
     containers {
@@ -101,6 +102,7 @@ resource "google_cloud_run_v2_service" "backend" {
 }
 
 resource "google_cloud_run_service_iam_member" "backend_public_access" {
+  count    = var.allow_unauthenticated_invocations ? 1 : 0
   location = google_cloud_run_v2_service.backend.location
   service  = google_cloud_run_v2_service.backend.name
   role     = "roles/run.invoker"

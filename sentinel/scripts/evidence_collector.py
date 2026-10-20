@@ -85,10 +85,10 @@ def collect_revision_logs(service_name: str, revision: str, dry_run: bool = Fals
     if dry_run or os.environ.get("SENTINEL_SIMULATION_MODE") == "true":
         return [
             f"2026-10-19T01:00:01Z [INFO] Initializing service {service_name} revision {revision}",
-            f"2026-10-19T01:00:03Z [INFO] Synthetic probe request POST /api/v1/orders received",
-            f"2026-10-19T01:00:03Z [ERROR] ZeroDivisionError: integer division or modulo by zero in calculate_discount",
-            f"2026-10-19T01:00:03Z [ERROR] Traceback (most recent call last): File 'app/app/routes/orders.py', line 34",
-            f"2026-10-19T01:00:03Z [WARNING] HTTP 500 returned to client (probe failure)",
+            "2026-10-19T01:00:03Z [INFO] Synthetic probe request POST /api/v1/orders received",
+            "2026-10-19T01:00:03Z [ERROR] ZeroDivisionError: integer division or modulo by zero in calculate_discount",
+            "2026-10-19T01:00:03Z [ERROR] Traceback (most recent call last): File 'app/app/routes/orders.py', line 34",
+            "2026-10-19T01:00:03Z [WARNING] HTTP 500 returned to client (probe failure)",
         ]
 
     cmd = [

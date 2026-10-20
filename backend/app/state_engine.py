@@ -221,4 +221,20 @@ def process_event_state_transition(event: dict[str, Any]) -> dict[str, Any] | No
                 "reason", f"Failed with {target_status}"
             )
 
+    # Enterprise S3 State Synchronization
+    try:
+        from app.s3_state_store import s3_state_store
+
+        s3_state_store.snapshot_state(
+            INCIDENTS_STORE,
+            extra_metadata={
+                "last_event_type": event_type,
+                "incident_id": incident_id,
+                "transition": f"{current_status} -> {target_status}",
+            },
+        )
+    except Exception:
+        pass
+
     return incident
+

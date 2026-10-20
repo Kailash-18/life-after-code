@@ -35,7 +35,9 @@ const AUTHORITY: [string, string][] = [
   ['Test integrity', 'The Integrity Gate job'],
   ['Merge', 'Required CI jobs'],
   ['RECOVERED', 'The post-redeploy evaluator'],
+  ['Infrastructure & Incident State', 'AWS S3 Remote State Plane (KMS CMK Encrypted & Versioned)'],
 ];
+
 
 export default function System() {
   const { source, connected, lastOkAt, stale, error, endpoints, snap, startDemo, exitDemo } = useSentinel();
@@ -73,7 +75,15 @@ export default function System() {
             ) : <p className="muted">Not read yet.</p>}
             <p className="muted small">GitLab project: {GITLAB_URL ? <a href={GITLAB_URL} target="_blank" rel="noreferrer">{GITLAB_URL.replace(/^https?:\/\//, '')} ↗</a> : <>not configured (<code>VITE_GITLAB_PROJECT_URL</code>)</>}</p>
           </Tilt>
+          <Tilt className="card" max={8}>
+
+            <span className="card__k">AWS S3 State Plane & Distributed Locking</span>
+            <b className="syslink__word tone-ok">KMS ENCRYPTED</b>
+            <p className="muted small">Bucket: <code>sentinel-terraform-state-prod</code> (<code>us-east-1</code>)</p>
+            <p className="muted small">Lock: <code>sentinel-terraform-state-locks</code> · Versioning: <code>ENABLED</code></p>
+          </Tilt>
         </div>
+
         {source === 'live' && (
           <div className="tablewrap" data-reveal>
             <table className="vtable">

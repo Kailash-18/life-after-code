@@ -43,4 +43,45 @@ output "cloud_dns_managed_zone" {
   value       = google_dns_managed_zone.sentinel_zone.name
 }
 
+output "migration_snapshot_s3_bucket" {
+  description = "Configured AWS S3 / S3-compatible bucket for cross-region disaster recovery snapshot archives"
+  value       = var.migration_snapshot_s3_bucket
+}
+
+output "migration_target_region" {
+  description = "Target destination cloud region for disaster recovery migration and automated restoration"
+  value       = var.migration_target_region
+}
+
+output "cloud_run_ingress" {
+  description = "Ingress traffic configuration policy applied to Cloud Run services"
+  value       = var.cloud_run_ingress
+}
+
+output "terraform_state_s3_bucket" {
+  description = "AWS S3 bucket hosting authoritative Terraform remote state and incident snapshots"
+  value       = var.enable_s3_state_bootstrap ? aws_s3_bucket.terraform_state[0].id : var.state_bucket_name
+}
+
+output "terraform_state_dynamodb_table" {
+  description = "AWS DynamoDB table enforcing distributed Terraform state locks"
+  value       = var.enable_s3_state_bootstrap ? aws_dynamodb_table.terraform_state_locks[0].id : var.dynamodb_lock_table_name
+}
+
+output "terraform_state_kms_key_arn" {
+  description = "KMS Customer Managed Key ARN securing S3 state storage and DynamoDB locks"
+  value       = var.enable_s3_state_bootstrap ? aws_kms_key.state_key[0].arn : null
+}
+
+output "terraform_state_kms_key_alias" {
+  description = "KMS Customer Managed Key Alias name"
+  value       = var.enable_s3_state_bootstrap ? aws_kms_alias.state_key_alias[0].name : null
+}
+
+output "ci_state_access_iam_policy_arn" {
+  description = "Scoped IAM Policy ARN for GitLab CI / Terraform runner least privilege state access"
+  value       = var.enable_s3_state_bootstrap ? aws_iam_policy.ci_state_access[0].arn : null
+}
+
+
 

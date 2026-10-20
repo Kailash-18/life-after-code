@@ -1,0 +1,14 @@
+# ==============================================================================
+# Local / Emulated S3 Backend Configuration (LocalStack / MinIO)
+# Usage: terraform init -backend-config=backend_config/local.s3.tfbackend
+# ==============================================================================
+bucket                      = "sentinel-terraform-state-dev"
+key                         = "live/dev/sentinel.tfstate"
+region                      = "us-east-1"
+dynamodb_table              = "sentinel-terraform-state-locks"
+encrypt                     = true
+skip_credentials_validation = true
+skip_metadata_api_check     = true
+skip_region_validation      = true
+force_path_style            = true
+endpoint                    = "http://localhost:4566"

@@ -19,6 +19,10 @@ from pathlib import Path
 from typing import Any
 import urllib.request
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from sentinel.scripts.emit_event import emit_event
 
 
@@ -214,11 +218,11 @@ def execute_rollback(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Sentinel Rollback Controller")
-    parser.add_argument("--service", default="sentinel-target-app", help="Cloud Run service name")
+    parser.add_argument("--service", default=os.environ.get("TARGET_APP_SERVICE", "sentinel-target-app"), help="Cloud Run service name")
     parser.add_argument("--stable-url", required=True, help="URL of known-good service endpoint")
     parser.add_argument("--known-good-rev", help="Target revision to restore (100 percent traffic)")
     parser.add_argument("--candidate-rev", default="rev-candidate-001", help="Faulty candidate revision")
-    parser.add_argument("--region", default="us-central1", help="Google Cloud region")
+    parser.add_argument("--region", default=os.environ.get("GCP_REGION", "us-central1"), help="Google Cloud region")
     parser.add_argument("--pipeline-id", help="GitLab CI Pipeline ID")
     parser.add_argument("--job-id", help="GitLab CI Job ID")
     parser.add_argument("--commit-sha", help="Git commit SHA")

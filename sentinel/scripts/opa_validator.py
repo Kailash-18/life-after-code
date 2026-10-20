@@ -145,14 +145,14 @@ def main() -> None:
     out_path.parent.mkdir(exist_ok=True)
     out_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
 
-    print(f"\n=======================================================")
-    print(f"  OPEN POLICY AGENT (OPA) REGO COMPLIANCE REPORT")
+    print("\n=======================================================")
+    print("  OPEN POLICY AGENT (OPA) REGO COMPLIANCE REPORT")
     print(f"  Decision: [{result['status']}] | Compliance Score: {result['compliance_score']}%")
     print(f"  Violations Detected: {result['violations_count']}")
     if result["violations"]:
         for v in result["violations"]:
             print(f"    - [!] {v}")
-    print(f"=======================================================\n")
+    print("=======================================================\n")
 
     if not result["allow"]:
         raise SystemExit(1)

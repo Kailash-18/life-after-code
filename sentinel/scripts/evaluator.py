@@ -311,7 +311,7 @@ def run_evaluation(
     report_md_path = artifact_dir / "evaluator-report.md"
     generate_markdown_report(report, report_md_path)
 
-    print(f"\n=======================================================")
+    print("\n=======================================================")
     print(f"  SENTINEL HEALTH EVALUATOR VERDICT: [{verdict}]")
     print(f"  Traffic Step: {traffic_percent}% | Revision: {revision_name}")
     print(f"  Candidate Error Rate: {candidate_stats['error_rate']:.2%} | p95: {candidate_stats['p95_ms']}ms")
@@ -373,7 +373,7 @@ def run_evaluation(
         print("    3. Sub-Second Rollback: Instant Cloud Run traffic splitting restores known-good revision in < 1.5s.")
         print("    4. Cost Efficiency: Avoids 100% duplicate infrastructure overhead required by Blue/Green.")
         print("  -------------------------------------------------------")
-    print(f"=======================================================\n")
+    print("=======================================================\n")
 
     # 5. Emit Evaluator Verdict to Backend
     if emit_to_backend:
@@ -412,22 +412,22 @@ def generate_markdown_report(report: dict[str, Any], output_path: Path) -> None:
     breaches = report["breached_thresholds"]
 
     lines = [
-        f"# Project Sentinel — Canary Health Evaluation Report",
-        f"",
+        "# Project Sentinel — Canary Health Evaluation Report",
+        "",
         f"**Verdict:** {color}  ",
         f"**Timestamp (UTC):** `{report['timestamp']}`  ",
         f"**Traffic Allocated:** `{report['traffic_percent']}%`  ",
         f"**Candidate Revision:** `{report['revision_name']}`  ",
-        f"",
-        f"## Telemetry Comparison",
-        f"",
-        f"| Metric | Candidate | Stable Baseline | Policy Threshold | Status |",
-        f"| :--- | :--- | :--- | :--- | :--- |",
+        "",
+        "## Telemetry Comparison",
+        "",
+        "| Metric | Candidate | Stable Baseline | Policy Threshold | Status |",
+        "| :--- | :--- | :--- | :--- | :--- |",
         f"| **Error Rate** | `{candidate['error_rate']:.2%}` | `{stable['error_rate']:.2%}` if stable else 'N/A' | `< {report['thresholds'].get('error_rate_max', 0.02):.1%}` | {'❌' if candidate['error_rate'] > report['thresholds'].get('error_rate_max', 0.02) else '✅'} |",
         f"| **p95 Latency** | `{candidate['p95_ms']}ms` | `{stable['p95_ms']}ms` if stable else 'N/A' | `< {report['thresholds'].get('p95_latency_ms_max', 300.0)}ms` | {'❌' if candidate['p95_ms'] > report['thresholds'].get('p95_latency_ms_max', 300.0) else '✅'} |",
         f"| **Sample Size** | `{candidate['sample_size']}` | `{stable['sample_size']}` if stable else 'N/A' | `—` | `—` |",
         f"| **Liveness (/healthz)** | `{'UP' if candidate['health_endpoint_ok'] else 'DOWN'}` | `UP` | `100% OK` | {'✅' if candidate['health_endpoint_ok'] else '❌'} |",
-        f"",
+        "",
     ]
 
     composite = report.get("composite_health", {})
