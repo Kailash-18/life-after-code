@@ -1,9 +1,19 @@
 import { useEffect, useState } from 'react';
-import { API_BASE, GITLAB_URL, getApiKey, rollbackToS3Snapshot } from '../api/client';
+import {
+  API_BASE,
+  DEFAULT_SENTINEL_API_KEY,
+  GITLAB_URL,
+  generateRandomApiKey,
+  getApiKey,
+  getJSON,
+  resetApiKey,
+  rollbackToS3Snapshot,
+  setApiKey,
+} from '../api/client';
 import type { S3RollbackResult } from '../api/types';
 import { useSentinel } from '../api/source';
 import { useMission } from '../state/mission';
-import { ApiKeyModal } from '../ui/ApiKeyModal';
+import { bus } from '../state/bus';
 import { MagButton, Tilt } from '../ui/fx';
 import { Chip, PageHead, SecHead, ago } from '../ui/kit';
 
@@ -152,7 +162,7 @@ export default function System() {
           </Tilt>
         </div>
 
-        <ApiKeyModal open={apiKeyModalOpen} onClose={() => setApiKeyModalOpen(false)} />
+        <SystemApiKeyModal open={apiKeyModalOpen} onClose={() => setApiKeyModalOpen(false)} />
 
         {source === 'live' && (
           <div className="tablewrap" data-reveal>
@@ -206,6 +216,302 @@ export default function System() {
           })}
         </ol>
       </section>
+    </div>
+  );
+}
+
+function SystemApiKeyModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [key, setLocalKey] = useState(getApiKey());
+  const [revealed, setRevealed] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [inputVal, setInputVal] = useState(getApiKey());
+  const [testResult, setTestResult] = useState<{ status: 'idle' | 'testing' | 'ok' | 'fail'; msg: string }>({
+    status: 'idle',
+    msg: '',
+  });
+
+  useEffect(() => {
+    if (open) {
+      const current = getApiKey();
+      setLocalKey(current);
+      setInputVal(current);
+      setEditing(false);
+      setTestResult({ status: 'idle', msg: '' });
+      bus.pulse(0.8);
+    }
+  }, [open]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && open) onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  const handleCopy = async () => {
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(key);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = key;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      setCopied(true);
+      bus.pulse(0.5);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // clipboard fallback
+    }
+  };
+
+  const handleSave = () => {
+    if (inputVal.trim()) {
+      setApiKey(inputVal.trim());
+      setLocalKey(inputVal.trim());
+      setEditing(false);
+      bus.pulse(1.0);
+    }
+  };
+
+  const handleReset = () => {
+    resetApiKey();
+    setLocalKey(DEFAULT_SENTINEL_API_KEY);
+    setInputVal(DEFAULT_SENTINEL_API_KEY);
+    setEditing(false);
+    bus.pulse(0.8);
+  };
+
+  const handleRotate = () => {
+    const newKey = generateRandomApiKey();
+    setApiKey(newKey);
+    setLocalKey(newKey);
+    setInputVal(newKey);
+    setEditing(false);
+    bus.pulse(1.2);
+  };
+
+  const handleTest = async () => {
+    setTestResult({ status: 'testing', msg: 'Validating against Sentinel backend...' });
+    try {
+      const res = (await getJSON('/api/v1/healthz')) as Record<string, unknown>;
+      if (res && (res.status === 'ok' || res.service)) {
+        setTestResult({ status: 'ok', msg: `HTTP 200 OK — Authenticated to ${res.service ?? 'Sentinel Backend'}` });
+      } else {
+        setTestResult({ status: 'ok', msg: 'HTTP 200 OK — Connected successfully' });
+      }
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      setTestResult({ status: 'fail', msg: `Authentication check response: ${errorMsg}` });
+    }
+  };
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 9999,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '1.5rem',
+        background: 'rgba(0, 0, 0, 0.75)',
+        backdropFilter: 'blur(8px)',
+      }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div
+        style={{
+          width: '100%',
+          maxWidth: '560px',
+          background: 'var(--panel, #0e121b)',
+          border: '1px solid var(--line, rgba(255, 255, 255, 0.12))',
+          borderRadius: '16px',
+          boxShadow: '0 24px 64px -12px rgba(0, 0, 0, 0.8), 0 0 32px -8px var(--cyan, #00f0ff)',
+          padding: '1.75rem',
+          color: 'var(--ink, #fff)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '1.25rem',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <span style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--cyan, #00f0ff)', fontWeight: 600 }}>
+              Access & Security
+            </span>
+            <h3 style={{ margin: '4px 0 0', fontSize: '18px', fontWeight: 600, color: 'var(--ink, #fff)' }}>
+              Sentinel API Key Vault
+            </h3>
+          </div>
+          <button
+            onClick={onClose}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--ink-2, #888)',
+              fontSize: '20px',
+              cursor: 'pointer',
+              padding: '4px 8px',
+            }}
+          >
+            ✕
+          </button>
+        </div>
+
+        <p style={{ margin: 0, fontSize: '13px', color: 'var(--ink-2, #aaa)', lineHeight: 1.5 }}>
+          Configures client authentication headers (<code>X-API-Key</code> and <code>Authorization: Bearer</code>) for all Sentinel API and S3 state operations.
+        </p>
+
+        <div
+          style={{
+            background: 'rgba(0, 0, 0, 0.4)',
+            border: '1px solid var(--line, rgba(255, 255, 255, 0.08))',
+            borderRadius: '10px',
+            padding: '1rem',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '0.75rem',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--ink-2, #888)' }}>CURRENT API KEY</span>
+            <span style={{ fontSize: '11px', color: 'var(--cyan, #00f0ff)', fontFamily: 'var(--mono, monospace)' }}>
+              STORAGE: ACTIVE
+            </span>
+          </div>
+
+          {editing ? (
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <input
+                type="text"
+                value={inputVal}
+                onChange={(e) => setInputVal(e.target.value)}
+                style={{
+                  flex: 1,
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  border: '1px solid var(--line, rgba(255, 255, 255, 0.2))',
+                  borderRadius: '6px',
+                  padding: '8px 12px',
+                  color: 'var(--ink, #fff)',
+                  fontFamily: 'var(--mono, monospace)',
+                  fontSize: '13px',
+                }}
+              />
+              <MagButton variant="violet" onClick={handleSave} cursor="Save">Save</MagButton>
+              <MagButton variant="ghost" onClick={() => setEditing(false)} cursor="Cancel">Cancel</MagButton>
+            </div>
+          ) : (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '12px',
+                background: 'rgba(255, 255, 255, 0.03)',
+                padding: '8px 12px',
+                borderRadius: '8px',
+                border: '1px dashed var(--line, rgba(255, 255, 255, 0.15))',
+              }}
+            >
+              <code style={{ fontSize: '13px', color: 'var(--cyan, #00f0ff)', wordBreak: 'break-all' }}>
+                {revealed ? key : (key.length > 14 ? `${key.slice(0, 10)}••••••••••••${key.slice(-4)}` : '••••••••••••••••')}
+              </code>
+              <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
+                <button
+                  onClick={() => setRevealed(!revealed)}
+                  style={{
+                    background: 'transparent',
+                    border: '1px solid var(--line, rgba(255, 255, 255, 0.15))',
+                    borderRadius: '6px',
+                    padding: '4px 8px',
+                    fontSize: '11px',
+                    color: 'var(--ink-2, #aaa)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {revealed ? 'Hide' : 'Reveal'}
+                </button>
+                <button
+                  onClick={handleCopy}
+                  style={{
+                    background: copied ? 'var(--cyan, #00f0ff)' : 'transparent',
+                    color: copied ? '#000' : 'var(--ink-2, #aaa)',
+                    border: '1px solid var(--line, rgba(255, 255, 255, 0.15))',
+                    borderRadius: '6px',
+                    padding: '4px 8px',
+                    fontSize: '11px',
+                    cursor: 'pointer',
+                    fontWeight: copied ? 700 : 400,
+                  }}
+                >
+                  {copied ? 'Copied!' : 'Copy'}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <MagButton variant="ghost" onClick={() => setEditing(!editing)} cursor="Edit">
+            {editing ? 'Close Editor' : 'Edit Key'}
+          </MagButton>
+          <MagButton variant="ghost" onClick={handleRotate} cursor="Rotate">
+            Rotate Key
+          </MagButton>
+          <MagButton variant="ghost" onClick={handleReset} cursor="Reset">
+            Reset to Default
+          </MagButton>
+          <MagButton variant="violet" onClick={handleTest} cursor="Test">
+            Test Authentication
+          </MagButton>
+        </div>
+
+        {testResult.status !== 'idle' && (
+          <div
+            style={{
+              padding: '10px 14px',
+              borderRadius: '8px',
+              fontSize: '12px',
+              fontFamily: 'var(--mono, monospace)',
+              background:
+                testResult.status === 'ok'
+                  ? 'rgba(46, 204, 113, 0.12)'
+                  : testResult.status === 'fail'
+                  ? 'rgba(231, 76, 60, 0.12)'
+                  : 'rgba(255, 255, 255, 0.05)',
+              border:
+                testResult.status === 'ok'
+                  ? '1px solid rgba(46, 204, 113, 0.3)'
+                  : testResult.status === 'fail'
+                  ? '1px solid rgba(231, 76, 60, 0.3)'
+                  : '1px solid var(--line, rgba(255, 255, 255, 0.1))',
+              color:
+                testResult.status === 'ok'
+                  ? '#2ecc71'
+                  : testResult.status === 'fail'
+                  ? '#e74c3c'
+                  : 'var(--ink-2, #aaa)',
+            }}
+          >
+            {testResult.msg}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

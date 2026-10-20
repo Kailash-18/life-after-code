@@ -54,7 +54,7 @@ def simulate_full_recovery_loop(
     release_id = f"rel-v1_2_0-{broken_sha[:7]}"
     fixed_release_id = f"rel-v1_2_1-{fix_sha[:7]}"
 
-    print("[*] Commencing Sentinel End-to-End Recovery Simulation...")
+    print(f"[*] Commencing Sentinel End-to-End Recovery Simulation...")
     print(f"    Backend URL:  {backend_url}")
     print(f"    Pipeline ID:  {pipe_id}")
     print(f"    Incident ID:  {inc_id}")
@@ -368,9 +368,9 @@ def simulate_full_recovery_loop(
     )
 
     print(f"\n{'='*70}")
-    print("  PROJECT SENTINEL RECOVERY SIMULATION: COMPLETED WITH EXCELLENCE! [SUCCESS]")
+    print(f"  PROJECT SENTINEL RECOVERY SIMULATION: COMPLETED WITH EXCELLENCE! [SUCCESS]")
     print(f"  Incident ID: {inc_id} -> Successfully Reached RECOVERED State.")
-    print("  Frontend Mission Control UI and Backend Timeline are synchronized!")
+    print(f"  Frontend Mission Control UI and Backend Timeline are synchronized!")
     print(f"{'='*70}\n")
 
     return {

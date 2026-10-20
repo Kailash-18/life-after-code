@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, status
 
 router = APIRouter(prefix="/api/v1/releases", tags=["releases"])
 
@@ -18,10 +18,10 @@ RELEASES_DB = {
 
 
 @router.get("")
-async def list_releases(limit: int = 20, status_filter: str | None = Query(None, alias="status")):
+async def list_releases(limit: int = 20, status: str | None = None):
     releases = list(RELEASES_DB.values())
-    if status_filter:
-        releases = [r for r in releases if r.get("status") == status_filter]
+    if status:
+        releases = [r for r in releases if r.get("status") == status]
     return releases[:limit]
 
 

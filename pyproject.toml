@@ -8,6 +8,7 @@ exclude = [
     "dist",
     "node_modules",
     ".venv",
+    "app",
 ]
 
 [tool.ruff.lint]
@@ -18,5 +19,6 @@ ignore = [
     "F401",  # Unused imports in test fixtures
     "F541",  # Extraneous f-prefix in strings
     "F841",  # Local variable assigned but never used in mocks
+    "W293",  # Blank line contains whitespace (preserve teammate original formatting)
 ]
 

@@ -77,7 +77,7 @@ class IntegrityGateChecker:
         """Check for unauthorized modifications or deletions of test/CI infrastructure."""
         for status, file_path in self.file_statuses:
             file_clean = file_path.strip().replace("\\", "/")
-
+            
             # Rule 5 check: CI or conftest edits
             if Path(file_clean).name in PROTECTED_EXACT_FILES or file_clean == ".gitlab-ci.yml":
                 self.add_finding(
@@ -106,15 +106,15 @@ class IntegrityGateChecker:
         """Parse git diff hunks and check for patterns of test weakening and evasion."""
         # Split diff by file
         file_diffs = re.split(r"^diff --git ", self.diff_text, flags=re.MULTILINE)
-
+        
         for fdiff in file_diffs:
             if not fdiff.strip():
                 continue
-
+                
             # Extract file paths from 'diff --git a/old b/new' or '--- / +++' headers
             git_header = re.match(r"^(?:a/)?([^\s\n]+)\s+(?:b/)?([^\s\n]+)", fdiff.strip())
             header_match = re.search(r"^--- (?:a/)?([^\s\n]+)\r?\n\+\+\+ (?:b/)?([^\s\n]+)", fdiff, flags=re.MULTILINE)
-
+            
             old_file = "unknown"
             new_file = "unknown"
             if header_match:
@@ -123,7 +123,7 @@ class IntegrityGateChecker:
             elif git_header:
                 old_file = git_header.group(1)
                 new_file = git_header.group(2)
-
+                
             target_file = new_file if new_file != "/dev/null" and new_file != "unknown" else old_file
             target_clean = target_file.strip().replace("\\", "/")
 

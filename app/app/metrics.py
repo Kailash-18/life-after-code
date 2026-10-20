@@ -39,6 +39,7 @@ async def metrics_middleware(request: Request, call_next):
         return response
     except Exception:
         status_code = 500
+        ERROR_COUNT.labels(endpoint=endpoint, status_code="500").inc()
         raise
     finally:
         duration = time.time() - start_time
@@ -52,6 +53,6 @@ async def metrics_middleware(request: Request, call_next):
             ERROR_COUNT.labels(endpoint=endpoint, status_code=str(status_code)).inc()
 
 
+def get_metrics_response(request: Request = None) -> Response:
 def get_metrics_response(request: Optional[Request] = None) -> Response:
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
-

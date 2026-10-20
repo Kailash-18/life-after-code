@@ -131,12 +131,12 @@ def run_test_in_checkout(
             f"--junitxml={wt_junit_xml}",
         ]
         proc = run_command(test_cmd, cwd=Path(temp_dir))
-
+        
         failure_type = ""
         if proc.returncode != 0:
             combined = proc.stdout + "\n" + proc.stderr
             failure_type = extract_failure_type(combined, wt_junit_xml)
-
+            
         return proc.returncode, proc.stdout, proc.stderr, failure_type
 
     finally:
@@ -211,7 +211,7 @@ def main():
     except ValueError:
         test_rel = Path(test_abs.name)
 
-    print("[+] Sentinel Regression Proof Gate")
+    print(f"[+] Sentinel Regression Proof Gate")
     print(f"    Repository:   {repo_root}")
     print(f"    Broken SHA:   {args.broken}")
     print(f"    Fix SHA:      {args.fix}")
@@ -286,7 +286,7 @@ def main():
                 print(f"[-] REJECTED: {results['rejection_reason']}")
             else:
                 results["verdict"] = "PROVEN"
-                print("[+] PROVEN: Test successfully fails on broken commit and passes on fix commit.")
+                print(f"[+] PROVEN: Test successfully fails on broken commit and passes on fix commit.")
         except Exception as exc:
             results["rejection_reason"] = f"Failed to execute test on fix commit ({args.fix}): {str(exc)}"
             results["fix_run"] = {
