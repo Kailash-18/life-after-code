@@ -256,21 +256,65 @@ python scripts/deploy.py --env prod
 
 ---
 
-## 5. Rollback & Emergency Recovery Runbook
+## 5. Authoritative S3 Snapshot Rollback & Emergency Recovery
 
-If any threshold is breached during canary progression:
+When an anomaly or health breach is detected, Sentinel provides multiple automated rollback options utilizing cryptographically verified AWS S3 point-in-time snapshots:
 
-1. **Sub-second Traffic Reversion:**
-   ```bash
-   python sentinel/scripts/rollback.py \
-     --service sentinel-target-app \
-     --stable-url "https://sentinel-target-app.run.app"
-   ```
-2. **Restore Historical S3 State:**
-   ```bash
-   python sentinel/scripts/s3_state_manager.py verify --snapshot-id <LAST_KNOWN_GOOD_SNAPSHOT>
-   ```
-3. **Inspect S3 State Lock:**
-   ```bash
-   python sentinel/scripts/s3_state_manager.py locks
-   ```
+### Option A: Turnkey Deployment Runner Rollback (Recommended)
+Executes end-to-end rollback: verifies cryptographic SHA-256 integrity of the S3 snapshot, restores backend state, and reverts 100% of Cloud Run traffic to the stable revision:
+
+```bash
+# Rollback using the latest verified S3 snapshot (dry-run):
+python scripts/deploy.py --rollback --dry-run
+
+# Rollback using the latest verified S3 snapshot (live production):
+python scripts/deploy.py --rollback
+
+# Rollback to a specific historical S3 snapshot ID:
+python scripts/deploy.py --rollback --rollback-snapshot snap-20261020040429-e85f5383
+```
+
+### Option B: Sentinel S3 State CLI Subcommand
+Directly manages state restoration and traffic reversion from the S3 state plane:
+
+```bash
+# Authoritative S3 snapshot rollback:
+python sentinel/scripts/s3_state_manager.py rollback --snapshot-id <SNAPSHOT_ID> --dry-run
+```
+
+### Option C: S3-Backed Cloud Run Rollback Controller
+Targeted Cloud Run traffic shift backed by S3 snapshot validation:
+
+```bash
+# Revert traffic using specific S3 snapshot:
+python sentinel/scripts/rollback.py \
+  --service sentinel-target-app \
+  --stable-url "http://localhost:8080" \
+  --s3-snapshot-id snap-20261020040429-e85f5383 \
+  --dry-run
+
+# Revert traffic automatically using the latest S3 snapshot:
+python sentinel/scripts/rollback.py \
+  --service sentinel-target-app \
+  --stable-url "http://localhost:8080" \
+  --use-latest-s3-snapshot \
+  --dry-run
+```
+
+### Option D: Backend REST API Rollback Endpoint
+Programmatic point-in-time state and traffic reversion for GitOps and incident response automations:
+
+```bash
+# Revert state and traffic to latest verified snapshot:
+curl -X POST http://localhost:8000/api/v1/state/rollback \
+  -H "Content-Type: application/json" \
+  -d '{"service_name": "sentinel-target-app", "dry_run": true}'
+
+# Revert state and traffic to an explicit snapshot ID:
+curl -X POST http://localhost:8000/api/v1/state/rollback \
+  -H "Content-Type: application/json" \
+  -d '{"snapshot_id": "snap-20261020040429-e85f5383", "service_name": "sentinel-target-app"}'
+```
+
+### Option E: Mission Control Web Console
+From the **System** dashboard, click **"Revert to S3 Snapshot"** in the **AWS S3 State Plane & Distributed Locking** panel to initiate instantaneous, verified state recovery.

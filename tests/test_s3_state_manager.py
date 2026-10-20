@@ -43,3 +43,21 @@ def test_dr_cross_region_replication():
     assert rep["status"] == "PASS"
     assert rep["rpo_seconds"] == 0.0
     assert rep["sha256_checksum_matched"] is True
+
+
+def test_s3_rollback_to_snapshot():
+    mgr = S3StateManager()
+    test_state = {"service": "sentinel-target-app", "revision_name": "sentinel-target-app-known-good-rev001"}
+    snap = mgr.snapshot_state_file(test_state, metadata={"restored_revision": "sentinel-target-app-known-good-rev001"})
+    snap_id = snap["snapshot_id"]
+
+    rb_res = mgr.rollback_to_snapshot(
+        snapshot_id=snap_id,
+        service_name="sentinel-target-app",
+        dry_run=True,
+    )
+    assert rb_res["post_rollback_probe_ok"] is True
+    assert rb_res["s3_snapshot_id"] == snap_id
+    assert rb_res["s3_integrity_verified"] is True
+    assert rb_res["restored_revision"] == "sentinel-target-app-known-good-rev001"
+

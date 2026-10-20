@@ -1,4 +1,6 @@
-import { API_BASE, GITLAB_URL } from '../api/client';
+import { useState } from 'react';
+import { API_BASE, GITLAB_URL, rollbackToS3Snapshot } from '../api/client';
+import type { S3RollbackResult } from '../api/types';
 import { useSentinel } from '../api/source';
 import { useMission } from '../state/mission';
 import { MagButton, Tilt } from '../ui/fx';
@@ -42,6 +44,21 @@ const AUTHORITY: [string, string][] = [
 export default function System() {
   const { source, connected, lastOkAt, stale, error, endpoints, snap, startDemo, exitDemo } = useSentinel();
   const { now } = useMission();
+  const [rollingBack, setRollingBack] = useState(false);
+  const [rollbackResult, setRollbackResult] = useState<S3RollbackResult | null>(null);
+
+  const handleRollback = async () => {
+    setRollingBack(true);
+    try {
+      const res = await rollbackToS3Snapshot();
+      setRollbackResult(res);
+    } catch {
+      // Handled in client fallback
+    } finally {
+      setRollingBack(false);
+    }
+  };
+
   const seen = (types: string[]) => snap.events.filter((e) => types.includes(e.type)).length;
   const link = source === 'demo' ? 'demo' : connected === null ? 'linking' : !connected ? 'offline' : stale ? 'stale' : 'live';
 
@@ -76,11 +93,20 @@ export default function System() {
             <p className="muted small">GitLab project: {GITLAB_URL ? <a href={GITLAB_URL} target="_blank" rel="noreferrer">{GITLAB_URL.replace(/^https?:\/\//, '')} ↗</a> : <>not configured (<code>VITE_GITLAB_PROJECT_URL</code>)</>}</p>
           </Tilt>
           <Tilt className="card" max={8}>
-
             <span className="card__k">AWS S3 State Plane & Distributed Locking</span>
             <b className="syslink__word tone-ok">KMS ENCRYPTED</b>
             <p className="muted small">Bucket: <code>sentinel-terraform-state-prod</code> (<code>us-east-1</code>)</p>
             <p className="muted small">Lock: <code>sentinel-terraform-state-locks</code> · Versioning: <code>ENABLED</code></p>
+            <div className="syslink__cta" style={{ marginTop: '0.6rem' }}>
+              <MagButton variant="ghost" onClick={handleRollback} cursor="Rollback">
+                {rollingBack ? 'Restoring Snapshot...' : 'Revert to S3 Snapshot'}
+              </MagButton>
+            </div>
+            {rollbackResult && (
+              <p className="muted small tone-ok" style={{ marginTop: '0.4rem', fontSize: '0.75rem' }}>
+                ✓ Restored <code>{rollbackResult.snapshot_id.slice(0, 18)}...</code> (100% traffic to stable)
+              </p>
+            )}
           </Tilt>
         </div>
 

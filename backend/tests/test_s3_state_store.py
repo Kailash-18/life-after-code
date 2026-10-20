@@ -115,3 +115,12 @@ def test_state_api_endpoints():
     restore_resp = client.post("/api/v1/state/restore", json={"snapshot_id": snap_id})
     assert restore_resp.status_code == 200
     assert restore_resp.json()["success"] is True
+
+    # 5. Rollback to snapshot
+    rollback_resp = client.post("/api/v1/state/rollback", json={"snapshot_id": snap_id, "dry_run": True})
+    assert rollback_resp.status_code == 200
+    rb_data = rollback_resp.json()
+    assert rb_data["status"] == "SUCCESS"
+    assert rb_data["snapshot_id"] == snap_id
+    assert rb_data["s3_integrity_verified"] is True
+    assert rb_data["traffic_split"]["stable_percent"] == 100

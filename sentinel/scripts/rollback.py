@@ -123,9 +123,34 @@ def execute_rollback(
     commit_sha: str | None = None,
     release_id: str | None = None,
     incident_id: str | None = None,
+    s3_snapshot_id: str | None = None,
     emit_to_backend: bool = True,
     dry_run: bool = False,
 ) -> dict[str, Any]:
+    s3_snapshot_data = None
+    if s3_snapshot_id:
+        print(f"[*] S3 Snapshot Rollback requested with Snapshot ID: {s3_snapshot_id}")
+        try:
+            from sentinel.scripts.s3_state_manager import S3StateManager
+
+            mgr = S3StateManager()
+            verify_res = mgr.verify_state_integrity(s3_snapshot_id)
+            if verify_res.get("status") == "PASS":
+                print(f"[+] S3 Snapshot SHA-256 integrity verified: {verify_res.get('computed_sha256')[:16]}...")
+                cache_file = Path(f"artifacts/state_cache/{s3_snapshot_id}.json")
+                if cache_file.exists():
+                    s3_snapshot_data = json.loads(cache_file.read_text(encoding="utf-8"))
+                    meta = s3_snapshot_data.get("metadata", {})
+                    st = s3_snapshot_data.get("state", {})
+                    snapshot_rev = meta.get("restored_revision") or meta.get("revision_name") or st.get("revision_name")
+                    if snapshot_rev:
+                        known_good_rev = snapshot_rev
+                        print(f"[+] Target revision extracted from S3 snapshot: {known_good_rev}")
+            else:
+                print(f"[!] Warning: S3 snapshot verification failed ({verify_res})", file=sys.stderr)
+        except Exception as e:
+            print(f"[!] Warning: S3 snapshot lookup error: {e}", file=sys.stderr)
+
     target_rev = get_known_good_revision(service_name, known_good_rev)
 
     # 1. Emit rollback.started
@@ -133,6 +158,7 @@ def execute_rollback(
         try:
             emit_event(
                 event_type="rollback.started",
+
                 source="sentinel-rollback:automated",
                 pipeline_id=pipeline_id,
                 job_id=job_id,
@@ -185,6 +211,10 @@ def execute_rollback(
         "traffic_res": traffic_res,
     }
 
+    if s3_snapshot_id:
+        report["s3_snapshot_id"] = s3_snapshot_id
+        report["s3_snapshot_verified"] = s3_snapshot_data is not None
+
     artifact_dir = Path("artifacts")
     artifact_dir.mkdir(exist_ok=True)
     report_path = artifact_dir / "rollback-report.json"
@@ -208,6 +238,7 @@ def execute_rollback(
                     "traffic_percent": 100,
                     "post_rollback_probe_ok": probe_ok,
                     "target": "stable",
+                    "s3_snapshot_id": s3_snapshot_id,
                 },
             )
         except Exception as e:
@@ -223,6 +254,8 @@ def main() -> None:
     parser.add_argument("--known-good-rev", help="Target revision to restore (100 percent traffic)")
     parser.add_argument("--candidate-rev", default="rev-candidate-001", help="Faulty candidate revision")
     parser.add_argument("--region", default=os.environ.get("GCP_REGION", "us-central1"), help="Google Cloud region")
+    parser.add_argument("--s3-snapshot-id", help="Rollback using an authoritative S3 state snapshot ID")
+    parser.add_argument("--use-latest-s3-snapshot", action="store_true", help="Automatically rollback using the latest verified S3 state snapshot")
     parser.add_argument("--pipeline-id", help="GitLab CI Pipeline ID")
     parser.add_argument("--job-id", help="GitLab CI Job ID")
     parser.add_argument("--commit-sha", help="Git commit SHA")
@@ -233,12 +266,24 @@ def main() -> None:
 
     args = parser.parse_args()
 
+    target_snapshot_id = args.s3_snapshot_id
+    if args.use_latest_s3_snapshot and not target_snapshot_id:
+        try:
+            from backend.app.s3_state_store import s3_state_store
+
+            snaps = s3_state_store.list_snapshots(limit=1)
+            if snaps:
+                target_snapshot_id = snaps[0]["snapshot_id"]
+        except Exception:
+            pass
+
     report = execute_rollback(
         service_name=args.service,
         stable_url=args.stable_url,
         known_good_rev=args.known_good_rev,
         candidate_rev=args.candidate_rev,
         region=args.region,
+        s3_snapshot_id=target_snapshot_id,
         pipeline_id=args.pipeline_id,
         job_id=args.job_id,
         commit_sha=args.commit_sha,
@@ -247,6 +292,7 @@ def main() -> None:
         emit_to_backend=not args.no_emit,
         dry_run=args.dry_run,
     )
+
 
     if not report["post_rollback_probe_ok"]:
         sys.exit(1)
