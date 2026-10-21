@@ -20,6 +20,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from sentinel.scripts.emit_event import emit_event
 
 # High-entropy secret patterns to scrub

@@ -53,6 +53,5 @@ async def metrics_middleware(request: Request, call_next):
             ERROR_COUNT.labels(endpoint=endpoint, status_code=str(status_code)).inc()
 
 
-def get_metrics_response(request: Request = None) -> Response:
 def get_metrics_response(request: Optional[Request] = None) -> Response:
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
