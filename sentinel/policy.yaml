@@ -165,3 +165,18 @@ rollback:
   post_rollback_max_error_rate: 0.00
   notification_channels:
     - "sentinel-backend-events"
+
+# Cloud FinOps & Carbon Intensity Budget Gate (Task K-FinOps)
+finops_budget:
+  monthly_budget_usd: 250.00          # Maximum monthly cloud spend limit for candidate release ($ USD)
+  max_cost_increase_pct: 25.0         # Cost delta alert threshold (% increase vs stable baseline)
+  max_carbon_intensity_gco2: 450.0    # Grid carbon intensity ceiling (gCO2eq/kWh)
+  enforce_budget_gate: true           # Enforce hard pass/fail gate before progressive canary promotion
+
+# Multi-Region Cloud Resilience & Dynamic Traffic Rebalancing Policy
+traffic_rebalancing:
+  latency_breach_threshold_ms: 180.0   # SLA ceiling for primary region P99 latency before traffic shedding
+  max_error_rate_threshold: 0.02       # Regional error rate limit (2%) before traffic evacuation
+  pre_warm_probe_count: 10             # Number of priming probes dispatched to secondary container pool
+  min_active_standby_pct: 10           # Minimum warm standby traffic weight on secondary region
+  auto_rebalance_on_breach: true       # Automatically trigger Anycast dynamic traffic split on breach
