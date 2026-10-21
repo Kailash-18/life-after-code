@@ -318,3 +318,39 @@ curl -X POST http://localhost:8000/api/v1/state/rollback \
 
 ### Option E: Mission Control Web Console
 From the **System** dashboard, click **"Revert to S3 Snapshot"** in the **AWS S3 State Plane & Distributed Locking** panel to initiate instantaneous, verified state recovery.
+
+---
+
+## 7. Multi-Cloud FinOps & GreenOps Carbon Intensity Guard
+
+Project Sentinel enforces automated financial and environmental gates prior to traffic promotion:
+
+- **Serverless Compute Cost Forecasting**: Computes Cloud Run vCPU/memory allocation costs and invocation tiering.
+- **State & Security Plane Accounting**: Audits AWS S3 standard-to-IA lifecycle tiering, KMS encryption ops, and Cloud Armor WAF rule inspection fees.
+- **Regional Carbon Intensity (GreenOps)**: Evaluates grid emission factors (`us-central1`: 380 gCO2/kWh vs `us-east1`: 340 gCO2/kWh) and computes the workload's environmental footprint.
+- **Autonomous Budget Gate**: Blocks releases that exceed monthly cloud spend limits (`$250/mo`) or introduce abnormal cost spikes (`> 25%`).
+
+```bash
+# Evaluate FinOps and Carbon Intensity directly:
+python sentinel/scripts/finops_guard.py --policy sentinel/policy.yaml --output-dir artifacts
+```
+
+---
+
+## 8. Multi-Region Cloud Resilience & Dynamic Traffic Rebalancing Mesh
+
+To mitigate regional cloud congestion and cold-start storms across Google Cloud Run:
+
+- **Anycast Dynamic Traffic Steering**: Rebalances live traffic splits between `us-central1` and `us-east1` based on real-time P99 latency and error rates.
+- **Container Pre-Warming Pool**: Fires concurrent priming pulses before routing traffic to a secondary region, eliminating cold-start latency spikes.
+- **Degradation Detection & Shedding**: Automatically shifts traffic from `90/10` to `40/60` (latency offload) or `0/100` (full regional evacuation) under stress.
+
+```bash
+# Probe and rebalance multi-region serverless traffic:
+python sentinel/scripts/cloud_traffic_rebalancer.py --output-dir artifacts
+
+# Simulate regional latency degradation offload:
+python sentinel/scripts/cloud_traffic_rebalancer.py --primary-latency 240.0 --output-dir artifacts
+```
+
+
