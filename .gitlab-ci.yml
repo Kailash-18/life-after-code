@@ -39,6 +39,33 @@ cache:
     - .cache/pip
 
 # ==============================================================================
+# DEVSECOPS 9-STAGE FULL LIFECYCLE AUDIT (Hackathon Prize: Most Stages Covered)
+# ==============================================================================
+lifecycle:9-stage-audit:
+  stage: lint
+  image: python:3.11-slim
+  script:
+    - echo "==> Validating 9-Stage DevSecOps Lifecycle orchestration and coverage"
+    - python sentinel/scripts/lifecycle_orchestrator.py --output-dir artifacts
+  artifacts:
+    when: always
+    paths:
+      - artifacts/devsecops-9-stage-lifecycle-report.json
+
+plan:finops-greenops:
+  stage: lint
+  image: python:3.11-slim
+  script:
+    - echo "==> [Stage: PLAN] FinOps Forecast & ISO/IEC 21031 SCI Carbon Assessment"
+    - python sentinel/scripts/finops_engine.py --dry-run
+    - python sentinel/scripts/sci_carbon_engine.py --dry-run
+  artifacts:
+    when: always
+    paths:
+      - artifacts/finops-spend-forecast.json
+      - artifacts/sci-carbon-intensity.json
+
+# ==============================================================================
 # STAGE 1: LINT & CONTRACT INTEGRITY
 # ==============================================================================
 lint:quality-gate:
@@ -122,6 +149,19 @@ chaos:multi-region-dr-drill:
     paths:
       - artifacts/disaster-recovery-report.json
 
+chaos:cloud-traffic-rebalance:
+  stage: test
+  image: python:3.11-slim
+  before_script:
+    - pip install pyyaml
+  script:
+    - echo "==> Running Multi-Region Cloud Resilience & Dynamic Traffic Rebalancing Drill"
+    - python sentinel/scripts/cloud_traffic_rebalancer.py --output-dir artifacts
+  artifacts:
+    when: always
+    paths:
+      - artifacts/cloud-traffic-rebalance-report.json
+
 test:ebpf-kernel-telemetry:
   stage: test
   image: python:3.11-slim
@@ -191,6 +231,50 @@ security:cosign-keyless-verify:
     paths:
       - artifacts/cosign-verification-report.json
 
+security:cyclonedx-vex:
+  stage: security
+  image: python:3.11-slim
+  script:
+    - echo "==> Generating CycloneDX Vulnerability Exploitability eXchange (VEX)"
+    - python sentinel/scripts/cyclonedx_vex.py --dry-run
+  artifacts:
+    when: always
+    paths:
+      - artifacts/cyclonedx-vex-report.json
+
+security:kms-envelope-audit:
+  stage: security
+  image: python:3.11-slim
+  script:
+    - echo "==> Auditing Multi-Cloud KMS Envelope Encryption & 90-Day Key Rotation"
+    - python sentinel/scripts/kms_auditor.py --dry-run
+  artifacts:
+    when: always
+    paths:
+      - artifacts/kms-rotation-report.json
+
+security:cloud-armor-waf:
+  stage: security
+  image: python:3.11-slim
+  script:
+    - echo "==> Enforcing Google Cloud Armor Adaptive WAF Layer 7 Mitigations"
+    - python sentinel/scripts/cloud_armor_mitigator.py --dry-run
+  artifacts:
+    when: always
+    paths:
+      - artifacts/cloud-armor-waf-report.json
+
+govern:cis-zero-trust:
+  stage: security
+  image: python:3.11-slim
+  script:
+    - echo "==> [Stage: GOVERN] CIS Multi-Cloud Zero-Trust Benchmark Audit"
+    - python sentinel/scripts/cis_governance_guard.py --dry-run
+  artifacts:
+    when: always
+    paths:
+      - artifacts/cis-governance-report.json
+
 
 
 # ==============================================================================
@@ -207,6 +291,33 @@ infra:terraform-validate:
   rules:
     - changes:
         - infra/**/*
+
+infra:s3-state-audit:
+  stage: infra
+  image: python:3.11-slim
+  before_script:
+    - pip install boto3 botocore
+  script:
+    - echo "==> Running Enterprise S3 Remote State & DynamoDB Distributed Lock Audit"
+    - python sentinel/scripts/s3_state_manager.py audit
+  artifacts:
+    when: always
+    paths:
+      - artifacts/s3-state-audit-report.json
+
+infra:finops-carbon-guard:
+  stage: infra
+  image: python:3.11-slim
+  before_script:
+    - pip install pyyaml
+  script:
+    - echo "==> Evaluating Multi-Cloud FinOps Spend Budget & GreenOps Carbon Intensity"
+    - python sentinel/scripts/finops_guard.py --policy sentinel/policy.yaml --output-dir artifacts
+  artifacts:
+    when: always
+    paths:
+      - artifacts/finops-cloud-cost-report.json
+
 
 # ==============================================================================
 # STAGE 5: CANARY DEPLOYMENT (Task K4)

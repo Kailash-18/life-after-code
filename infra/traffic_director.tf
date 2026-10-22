@@ -5,7 +5,7 @@
 resource "google_cloud_run_v2_service" "target_app_failover" {
   name     = "sentinel-target-app-east"
   location = var.failover_region
-  ingress  = "INGRESS_TRAFFIC_ALL"
+  ingress  = var.cloud_run_ingress
 
   template {
     containers {
@@ -48,6 +48,7 @@ resource "google_cloud_run_v2_service" "target_app_failover" {
 }
 
 resource "google_cloud_run_service_iam_member" "target_app_failover_public_access" {
+  count    = var.allow_unauthenticated_invocations ? 1 : 0
   location = google_cloud_run_v2_service.target_app_failover.location
   service  = google_cloud_run_v2_service.target_app_failover.name
   role     = "roles/run.invoker"

@@ -256,16 +256,28 @@ def run_canary_deployment(
     with open(report_file, "w", encoding="utf-8") as f:
         json.dump(report, f, indent=2)
 
+    # Enterprise S3 Remote State Checkpoint
+    try:
+        from sentinel.scripts.s3_state_manager import S3StateManager
+
+        s3_mgr = S3StateManager()
+        s3_snap = s3_mgr.snapshot_state_file(report, metadata={"type": "canary_deploy", "strategy": report.get("strategy", "canary_progressive")})
+        report["s3_state_snapshot"] = s3_snap
+    except Exception:
+        pass
+
+
     return report
+
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Sentinel Canary Deployment Controller")
-    parser.add_argument("--service", default="sentinel-target-app", help="Cloud Run service name")
-    parser.add_argument("--image", default="us-central1-docker.pkg.dev/project-sentinel/sentinel/target-app:candidate", help="Container image URI")
+    parser.add_argument("--service", default=os.environ.get("TARGET_APP_SERVICE", "sentinel-target-app"), help="Cloud Run service name")
+    parser.add_argument("--image", default=os.environ.get("TARGET_APP_IMAGE", "us-central1-docker.pkg.dev/project-sentinel/sentinel/target-app:candidate"), help="Container image URI")
     parser.add_argument("--release-id", default="rel-candidate-001", help="Sentinel release identifier")
     parser.add_argument("--traffic-percent", type=int, default=0, help="Initial traffic percentage")
-    parser.add_argument("--region", default="us-central1", help="Google Cloud region")
+    parser.add_argument("--region", default=os.environ.get("GCP_REGION", "us-central1"), help="Google Cloud region")
     parser.add_argument("--fault-injection", action="store_true", help="Deploy with FAULT_INJECTION_MODE=true")
     parser.add_argument(
         "--strategy",

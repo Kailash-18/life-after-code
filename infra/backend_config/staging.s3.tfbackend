@@ -1,0 +1,9 @@
+# ==============================================================================
+# Staging S3 Backend Configuration for Terraform Remote State
+# Usage: terraform init -backend-config=backend_config/staging.s3.tfbackend
+# ==============================================================================
+bucket         = "sentinel-terraform-state-staging"
+key            = "live/staging/sentinel.tfstate"
+region         = "us-east-1"
+dynamodb_table = "sentinel-terraform-state-locks"
+encrypt        = true

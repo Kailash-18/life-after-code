@@ -46,10 +46,54 @@ variable "backend_image" {
 # --- Cryptographic & Sensitive Credentials ---
 
 variable "initial_hmac_secret" {
-  description = "Cryptographic secret key for HMAC-SHA256 event signature verification"
+  description = "Cryptographic secret key for HMAC-SHA256 event signature verification. In production, provide via TF_VAR_initial_hmac_secret or GitLab CI/CD Masked Variables."
   type        = string
   sensitive   = true
-  default     = "hackathon-transcend-sentinel-key-2026"
+  default     = "dev-insecure-hmac-secret-min16chars"
+
+  validation {
+    condition     = length(var.initial_hmac_secret) >= 16
+    error_message = "The initial_hmac_secret must be at least 16 characters for cryptographic HMAC-SHA256 security."
+  }
+}
+
+# --- Cross-Region Disaster Recovery & Migration via S3 ---
+
+variable "migration_snapshot_s3_bucket" {
+  description = "AWS S3 or S3-compatible bucket name for storing regional disaster recovery snapshot archives"
+  type        = string
+  default     = "sentinel-region-migration-snapshots"
+}
+
+variable "migration_target_region" {
+  description = "Target destination cloud region for disaster recovery migration and automated restoration"
+  type        = string
+  default     = "us-east1"
+}
+
+variable "s3_endpoint_url" {
+  description = "Custom S3 endpoint URL (supports AWS S3, LocalStack, MinIO, or GCS S3-interoperability)"
+  type        = string
+  default     = ""
+}
+
+# --- Cloud Run Zero-Trust Network & Security Controls ---
+
+variable "cloud_run_ingress" {
+  description = "Network ingress restriction for Cloud Run services (INGRESS_TRAFFIC_ALL or INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER for zero-trust perimeter)"
+  type        = string
+  default     = "INGRESS_TRAFFIC_ALL"
+
+  validation {
+    condition     = contains(["INGRESS_TRAFFIC_ALL", "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER", "INGRESS_TRAFFIC_INTERNAL_ONLY"], var.cloud_run_ingress)
+    error_message = "cloud_run_ingress must be INGRESS_TRAFFIC_ALL, INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER, or INGRESS_TRAFFIC_INTERNAL_ONLY."
+  }
+}
+
+variable "allow_unauthenticated_invocations" {
+  description = "Whether to allow allUsers public invoker access directly to Cloud Run services (set to false to enforce load balancer + WAF ingress only)"
+  type        = bool
+  default     = true
 }
 
 # --- Cloud Armor Security & Rate Limiting ---
@@ -153,3 +197,36 @@ variable "dns_ttl" {
   type        = number
   default     = 5
 }
+
+# --- AWS S3 Remote State & DynamoDB Distributed Locking Architecture ---
+
+variable "aws_state_region" {
+  description = "AWS region for Terraform S3 state bucket, KMS key, and DynamoDB lock table"
+  type        = string
+  default     = "us-east-1"
+}
+
+variable "state_bucket_name" {
+  description = "Globally unique AWS S3 bucket name for storing enterprise Terraform remote state and incident snapshots"
+  type        = string
+  default     = "sentinel-terraform-state-prod"
+}
+
+variable "dynamodb_lock_table_name" {
+  description = "AWS DynamoDB table name for distributed Terraform state locking and concurrency control"
+  type        = string
+  default     = "sentinel-terraform-state-locks"
+}
+
+variable "enable_s3_state_bootstrap" {
+  description = "Whether to provision the AWS S3 state bucket, KMS key, and DynamoDB locking table resources in this module"
+  type        = bool
+  default     = true
+}
+
+variable "state_kms_key_deletion_window_in_days" {
+  description = "Duration in days after which the KMS CMK key is deleted upon destruction"
+  type        = number
+  default     = 30
+}
+

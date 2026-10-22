@@ -11,7 +11,8 @@ gitlab_project_path = "project-sentinel/sentinel"
 app_image     = "us-central1-docker.pkg.dev/project-sentinel-hackathon/sentinel/target-app:stable"
 backend_image = "us-central1-docker.pkg.dev/project-sentinel-hackathon/sentinel/backend:latest"
 
-initial_hmac_secret = "hackathon-transcend-sentinel-key-2026"
+# 3. Cryptographic Secret Keys (Do NOT commit production keys to git; pass via TF_VAR_initial_hmac_secret)
+initial_hmac_secret = "dev-insecure-hmac-secret-min16chars"
 
 cloud_armor_policy_name     = "sentinel-cloud-armor-policy"
 rate_limit_threshold_count  = 1000
@@ -32,3 +33,18 @@ backend_timeout_sec = 30
 lb_forwarding_port  = "80"
 dns_domain_name     = "sentinel-mesh.internal."
 dns_ttl             = 5
+
+# 7. Cross-Region Disaster Recovery & Migration via S3
+migration_snapshot_s3_bucket = "sentinel-region-migration-snapshots"
+migration_target_region      = "us-east1"
+
+# 8. Zero-Trust Cloud Run Perimeter Controls
+cloud_run_ingress                 = "INGRESS_TRAFFIC_ALL"
+allow_unauthenticated_invocations = true
+
+# 9. AWS S3 Remote State & DynamoDB Distributed Locking
+aws_state_region          = "us-east-1"
+state_bucket_name         = "sentinel-terraform-state-prod"
+dynamodb_lock_table_name  = "sentinel-terraform-state-locks"
+enable_s3_state_bootstrap = true
+
