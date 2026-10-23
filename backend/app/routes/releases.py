@@ -1,6 +1,5 @@
-from fastapi import APIRouter, HTTPException, status
-
 from app.persistence.factory import get_repository
+from fastapi import APIRouter, HTTPException, status
 
 router = APIRouter(prefix="/api/v1/releases", tags=["releases"])
 

@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import httpx
+from fastapi import HTTPException
 
 from app.config import settings
 from app.models.entities import EventRecord, IncidentStatus
@@ -130,7 +131,7 @@ def maybe_dispatch(incident_id: str) -> None:
         }
         try:
             process_event_state_transition(event)
-        except Exception as exc:  # state moved underneath us; record, don't crash
+        except HTTPException as exc:  # state moved underneath us; record, don't crash
             logger.warning("flow.started not applied for %s: %s", incident_id, exc)
             return
         _record(incident_id, "flow.started", result.session_id, {"flow_session_id": result.session_id},
@@ -142,7 +143,7 @@ def maybe_dispatch(incident_id: str) -> None:
             inc = repo.get_incident(incident_id)
             _apply_transition(inc, "INVESTIGATION_FAILED", f"Flow dispatch failed: {result.error}")
             repo.save_incident(inc)
-        except Exception as exc:
+        except HTTPException as exc:
             logger.warning("Could not record dispatch failure for %s: %s", incident_id, exc)
             return
         _record(incident_id, "flow.dispatch_failed", f"dispatch-{attempt_no}", {"reason": result.error},

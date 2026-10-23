@@ -24,9 +24,7 @@ from pathlib import Path
 from typing import Any
 
 import jsonschema
-from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, status
-from pydantic import BaseModel, Field, ValidationError
-
+from app.analysis_ingest import ingest_analysis
 from app.config import settings
 from app.flow_dispatch import maybe_dispatch
 from app.models.entities import EventRecord
@@ -34,6 +32,8 @@ from app.persistence.factory import get_repository
 from app.release_tracker import process_release_event
 from app.security import find_secret_values, redact_sensitive_keys
 from app.state_engine import expire_overdue_attempts, process_event_state_transition
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, status
+from pydantic import BaseModel, Field, ValidationError
 
 logger = logging.getLogger("sentinel.events")
 
@@ -284,6 +284,8 @@ async def ingest_ci_event(
     # 8. Start the investigation flow after the response is sent.
     if incident and incident.get("status") == "EVIDENCE_COLLECTED":
         background_tasks.add_task(maybe_dispatch, incident["id"])
+    if incident and payload.type == "repair.proposed" and sanitized_data.get("fix_sha"):
+        background_tasks.add_task(ingest_analysis, incident["id"], str(sanitized_data["fix_sha"]))
 
     return {
         "status": "accepted",

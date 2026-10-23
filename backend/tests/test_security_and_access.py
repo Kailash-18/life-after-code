@@ -5,8 +5,8 @@ Tasks R7 + R8: no secrets stored, writes only from CI, dashboard is read-only.
 import json
 
 import pytest
-
 from app.config import Settings, settings
+
 from tests.helpers import FIX_SHA, drive_to, ok, send
 
 FAKE_GITLAB_TOKEN = "glpat-" + "x1Y2z3" * 4  # seeded fake secret, not a real token

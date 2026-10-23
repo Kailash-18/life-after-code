@@ -3,7 +3,6 @@
 from pathlib import Path
 
 import yaml
-
 from app.main import app
 
 CONTRACT = Path(__file__).resolve().parents[2] / "docs" / "contracts" / "openapi.yaml"

@@ -18,13 +18,13 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Header, HTTPException, status
-
+from app.analysis_ingest import ingest_analysis
 from app.config import settings
 from app.models.entities import EventRecord
 from app.persistence.factory import get_repository
 from app.security import sanitize_for_storage
 from app.state_engine import process_event_state_transition
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, status
 
 router = APIRouter(prefix="/api/v1/webhooks", tags=["webhooks"])
 
@@ -82,6 +82,7 @@ def _apply_mr_event(attrs: dict[str, Any], entity_id: str) -> tuple[str | None, 
 @router.post("/gitlab")
 async def gitlab_webhook(
     payload: dict[str, Any],
+    background_tasks: BackgroundTasks,
     x_gitlab_token: str | None = Header(None, alias="X-Gitlab-Token"),
     x_gitlab_event: str | None = Header(None, alias="X-Gitlab-Event"),
 ):
@@ -132,6 +133,9 @@ async def gitlab_webhook(
     incident_id, outcome = (None, None)
     if object_kind == "merge_request":
         incident_id, outcome = _apply_mr_event(attrs, entity_id)
+        head_sha = (attrs.get("last_commit") or {}).get("id")
+        if outcome and outcome.get("incident_status") == "REPAIR_PROPOSED" and head_sha:
+            background_tasks.add_task(ingest_analysis, incident_id, head_sha)
 
     sanitized_payload = sanitize_for_storage(payload)
     if incident_id:

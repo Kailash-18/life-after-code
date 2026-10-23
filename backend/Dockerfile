@@ -16,7 +16,7 @@ COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend/app/ ./app/
-COPY docs/contracts/event.schema.json ./contracts/event.schema.json
+COPY docs/contracts/event.schema.json docs/contracts/analysis.schema.json ./contracts/
 
 RUN useradd --create-home --uid 10001 sentinel
 USER sentinel

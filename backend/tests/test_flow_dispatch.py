@@ -6,10 +6,10 @@ The GitLab Flows API is mocked here; the real call is UNVERIFIED until spike S1.
 from datetime import UTC, datetime, timedelta
 
 import pytest
-
-from app import flow_dispatch
 from app.config import settings
 from app.persistence.factory import get_repository
+
+from app import flow_dispatch
 from tests.helpers import drive_to, ok, send
 
 

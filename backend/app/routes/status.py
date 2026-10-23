@@ -5,11 +5,10 @@ Every number comes from a recorded CI/evaluator event. When nothing has been
 measured yet the fields are null ("unknown"), never a made-up healthy value.
 """
 
-from fastapi import APIRouter
-
 from app.models.entities import IncidentStatus, ReleaseStatus
 from app.persistence.factory import get_repository
 from app.state_engine import expire_overdue_attempts
+from fastapi import APIRouter
 
 router = APIRouter(prefix="/api/v1/status", tags=["status"])
 

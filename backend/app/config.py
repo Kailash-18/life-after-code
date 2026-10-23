@@ -45,6 +45,8 @@ class Settings(BaseSettings):
     gitlab_project_id: str | None = os.getenv("GITLAB_PROJECT_ID")
     gitlab_flow_token: str | None = os.getenv("GITLAB_FLOW_TOKEN")
     gitlab_flow_definition: str | None = os.getenv("SENTINEL_FLOW_DEFINITION")
+    # Read-only token (read_api / read_repository) used to fetch analysis.json from repair MRs.
+    gitlab_read_token: str | None = os.getenv("GITLAB_READ_TOKEN")
 
     def validate_for_startup(self) -> None:
         """Refuse to run in production with development secrets or no flow config."""

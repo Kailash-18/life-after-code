@@ -20,7 +20,7 @@ Contracts: [`docs/contracts/openapi.yaml`](contracts/openapi.yaml) ·
 | R6 read APIs | Implemented | `/status`, `/releases`, `/incidents`, `/incidents/{id}/timeline`; no seeded or placeholder data |
 | R7 evidence + redaction | Implemented | Evidence URL + SHA-256 stored; sensitive keys redacted; credential-like values rejected (events) or masked (webhooks) |
 | R8 access control | Implemented | Writes need the CI HMAC (or GitLab token for webhooks); browsers get GET-only CORS |
-| Analysis ingestion (`analysis.json` from the MR) | **Planned** | The `analysis` field is served with `advisory: true` once stored |
+| Analysis ingestion | Implemented, **GitLab call unverified** | On repair MR open (webhook) or `repair.proposed`, fetches `sentinel/incidents/<id>/analysis.json` at the fix SHA, validates against `analysis.schema.json`, stores it with `advisory: true`. Never changes state. Invalid → `analysis.rejected` in the timeline |
 
 ## Evidence required per transition
 
@@ -64,6 +64,7 @@ without an `incident_id` update releases, deployments and health samples, which 
 | `GITLAB_API_URL` | GitLab API base | `https://gitlab.com/api/v4` | — |
 | `GITLAB_PROJECT_ID` | Project the flow runs in | — | Required for `gitlab_api` |
 | `GITLAB_FLOW_TOKEN` | Token for the Flows API (Secret Manager) | — | Required for `gitlab_api`; never logged or sent to the flow |
+| `GITLAB_READ_TOKEN` | Read-only token (`read_api`) to fetch `analysis.json` | falls back to `GITLAB_FLOW_TOKEN` | Optional; without it analysis ingestion is skipped |
 | `SENTINEL_FLOW_DEFINITION` | `workflow_definition` of the custom flow | — | Required for `gitlab_api` (value unknown until S1) |
 
 ## Signing events (for CI)
@@ -87,6 +88,16 @@ sig = "sha256=" + hmac.new(os.environ["SENTINEL_HMAC_SECRET"].encode(), body, ha
 req = urllib.request.Request(os.environ["SENTINEL_API_URL"] + "/api/v1/events", data=body, method="POST",
       headers={"Content-Type": "application/json", "X-Sentinel-Signature": sig, "X-Sentinel-Timestamp": now})
 urllib.request.urlopen(req)
+```
+
+## End-to-end smoke test (dev only)
+
+`backend/scripts/smoke_e2e.py` drives a **running** backend through the whole loop over HTTP
+with signed synthetic events and checks `/status`, the incident and its timeline
+(18 checks, exit 0 = all passed). Do not point it at the demo deployment: it creates a fake incident.
+
+```bash
+SENTINEL_API_URL=http://localhost:8000 SENTINEL_HMAC_SECRET=... python backend/scripts/smoke_e2e.py
 ```
 
 ## Error format
@@ -127,4 +138,5 @@ with `--min-instances=1 --max-instances=1` and accept that a restart clears hist
   to be the evaluator, so the secret must be a protected + masked variable scoped to the jobs that emit events.
 - The Flows API dispatch route (`gitlab_api`) is implemented against the documented endpoint
   but **not verified** in our GitLab namespace (token type and `workflow_definition` unknown).
-- `analysis.json` is not yet fetched from the repair MR.
+- Analysis `evidence_ref`s are not checked against the bundle's contents (acceptance #4 is
+  judged by reading the analysis next to the bundle).

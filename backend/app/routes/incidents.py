@@ -1,7 +1,6 @@
-from fastapi import APIRouter, HTTPException, status
-
 from app.persistence.factory import get_repository
 from app.state_engine import expire_overdue_attempts
+from fastapi import APIRouter, HTTPException, status
 
 router = APIRouter(prefix="/api/v1/incidents", tags=["incidents"])
 
