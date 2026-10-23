@@ -17,6 +17,30 @@ the real backend, both gates and Mission Control, with one incident recovered an
 | 7 | **Deploy.** Run the backend and target app on Cloud Run, and the frontend on hosting with `VITE_API_BASE` set. Keep it up until about Nov 16 for the bonus. | Kailash (+ Samvit for the frontend) | Public links work |
 | 8 | **Demo video** (under 3 min, public YouTube), Devpost text, README with run steps. | Unassigned | Submitted |
 
+## Local end-to-end run with the real scripts (Krishna, Oct 24)
+
+Demo app (healthy + seeded fault), the real `evaluator.py`, `rollback.py`, `evidence_collector.py`,
+`regression_proof.py`, `integrity_gate.py` and `report_gate_verdict.py`, against the real backend.
+Only GitLab itself (MR open/merge webhooks) was simulated.
+
+Result: one incident went DETECTED → ROLLED_BACK → EVIDENCE_COLLECTED → (inferred) INVESTIGATING →
+REPAIR_PROPOSED → VERIFYING → MERGED → REDEPLOYING → RECOVERED, and a healthy release opened no incident.
+
+Found and fixed on the way (Kailash, please review):
+- `sentinel/policy.yaml` POST probe used `sku`/`tier`, which the demo app rejects (422): even the
+  healthy app failed with 48 % errors. Now `item_id`/`customer_tier`, with mixed-case tiers so the
+  seeded fault is visible (faulty release: 16.7 % errors).
+- `evaluator.py`: the candidate is probed first and paid client warm-up, so its p95 was ~15× the
+  stable one and every release failed the latency ratio. Added unmeasured warm-up requests. The
+  latency ratio and the Mann-Whitney test now also need a p95 slowdown > `latency_ratio_min_delta_ms`
+  (50 ms). Before: healthy release falsely failed 4/12 runs; after: 25/25 PASS, faulty 10/10 FAIL.
+
+Still open (Kailash's scripts, not changed):
+- `rollback.py` reports `success` with mode `fallback_local` when gcloud fails, and hard-codes
+  `post_rollback_probe_ok: true` in simulation mode: the backend would record a rollback that did not happen.
+- `auto_merge.py` falls back to a "simulated merge" with a hard-coded SHA when the GitLab API fails, and
+  still emits `merge.completed`.
+
 ## Should fix
 
 - **Signing secrets.** Remove the hard-coded HMAC fallbacks (`.gitlab-ci.yml`, `backend/app/config.py`, `emit_event.py`). Set a masked CI variable and a Secret Manager entry instead. (Kailash, Krishna)
