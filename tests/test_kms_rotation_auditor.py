@@ -45,3 +45,5 @@ def test_run_kms_audit_artifact(tmp_path: Path):
     assert report["verdict"] == "PASS"
     out_file = tmp_path / "kms-rotation-audit-report.json"
     assert out_file.exists()
+    alias_file = tmp_path / "kms-rotation-report.json"
+    assert alias_file.exists()

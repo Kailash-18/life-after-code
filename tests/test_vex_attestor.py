@@ -31,3 +31,5 @@ def test_run_vex_audit_artifact(tmp_path: Path):
     assert report["verdict"] == "VEX_CERTIFIED_CLEAN"
     out_file = tmp_path / "cyclonedx-vex-attestation.json"
     assert out_file.exists()
+    alias_file = tmp_path / "cyclonedx-vex-report.json"
+    assert alias_file.exists()

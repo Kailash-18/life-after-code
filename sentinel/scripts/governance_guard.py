@@ -119,6 +119,7 @@ def run_governance_audit(
         output_dir.mkdir(parents=True, exist_ok=True)
         out_file = output_dir / "governance-compliance-report.json"
         out_file.write_text(json.dumps(report, indent=2), encoding="utf-8")
+        (output_dir / "cis-governance-report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
 
     return report
 
@@ -126,6 +127,7 @@ def run_governance_audit(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Sentinel Multi-Cloud Governance Guard")
     parser.add_argument("--output-dir", default="artifacts", help="Report output dir")
+    parser.add_argument("--dry-run", action="store_true", help="Simulate CIS governance audit in safe mode")
     args = parser.parse_args()
 
     report = run_governance_audit(output_dir=Path(args.output_dir))

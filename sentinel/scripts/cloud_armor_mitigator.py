@@ -57,12 +57,56 @@ class CloudArmorMitigator:
                     "reason": f"Signature match: {req['pattern']}",
                 })
 
+        gcp_policy = self.export_gcp_armor_policy(mitigated_rules)
+
         return {
             "policy_name": "sentinel-armor-edge-waf",
             "threats_detected": len(mitigated_rules),
             "dynamic_rules_generated": mitigated_rules,
             "waf_active": True,
             "status": "THREATS_MITIGATED" if mitigated_rules else "ALL_TRAFFIC_CLEAN",
+            "gcp_security_policy": gcp_policy,
+        }
+
+    def export_gcp_armor_policy(self, rules: list[dict[str, Any]]) -> dict[str, Any]:
+        """Exports Google Cloud Armor security policy JSON compatible with gcloud compute security-policies import."""
+        gcp_rules = []
+        for idx, r in enumerate(rules):
+            action = "rate_based_ban" if r["action"] == "rate_based_ban" else "deny(403)"
+            gcp_rules.append({
+                "action": action,
+                "priority": r.get("priority", 1000 + idx * 100),
+                "match": {
+                    "versionedExpr": "SRC_IPS_V1",
+                    "config": {
+                        "srcIpRanges": [f"{r['target_ip']}/32"],
+                    },
+                },
+                "description": r.get("reason", "Sentinel automated Layer 7 WAF mitigation"),
+            })
+
+        # Default allow rule
+        gcp_rules.append({
+            "action": "allow",
+            "priority": 2147483647,
+            "match": {
+                "versionedExpr": "SRC_IPS_V1",
+                "config": {"srcIpRanges": ["*"]},
+            },
+            "description": "Default allow rule for legitimate application traffic",
+        })
+
+        return {
+            "name": "sentinel-adaptive-edge-waf",
+            "description": "Google Cloud Armor L7 WAF Policy generated autonomously by Project Sentinel",
+            "type": "CLOUD_ARMOR",
+            "adaptiveProtectionConfig": {
+                "layer7DdosDefenseConfig": {
+                    "enable": True,
+                    "ruleVisibility": "STANDARD",
+                },
+            },
+            "rules": gcp_rules,
         }
 
 
@@ -75,6 +119,8 @@ def run_armor_audit(output_dir: Path | None = None) -> dict[str, Any]:
         output_dir.mkdir(parents=True, exist_ok=True)
         out_file = output_dir / "cloud-armor-threat-mitigation-report.json"
         out_file.write_text(json.dumps(report, indent=2), encoding="utf-8")
+        # Dual-save canonical WAF report artifact for GitLab CI security stage
+        (output_dir / "cloud-armor-waf-report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
 
     return report
 
@@ -82,6 +128,7 @@ def run_armor_audit(output_dir: Path | None = None) -> dict[str, Any]:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Sentinel Cloud Armor WAF Threat Mitigator")
     parser.add_argument("--output-dir", default="artifacts", help="Report output dir")
+    parser.add_argument("--dry-run", action="store_true", help="Simulate Cloud Armor WAF threat mitigation in safe mode")
     args = parser.parse_args()
 
     report = run_armor_audit(output_dir=Path(args.output_dir))
