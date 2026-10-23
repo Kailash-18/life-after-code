@@ -356,7 +356,9 @@ def process_event_state_transition(event: dict[str, Any]) -> dict[str, Any] | No
         if resolved:
             repo.link_correlation(f"alias:{incident_id}", resolved)
             incident_id = resolved
-    if not incident_id and event_type in STATE_EVENT_TYPES:
+    if not incident_id:
+        # Also for informational events (rollback.started, ...): they never move state,
+        # but linking them puts them on the incident's timeline.
         incident_id = resolve_incident_for(event)
     if not incident_id and (event_type == "incident.detected" or _evaluator_detects(event)):
         # The evaluator's measured FAIL is the authoritative detection (§A5).

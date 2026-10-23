@@ -180,3 +180,14 @@ def test_unauthoritative_fail_does_not_open_incident(client, emit):
     emit("evaluator.verdict", "gitlab/duo/agent", 4001, BROKEN,
          data={"verdict": "FAIL", "target": "candidate", "breached_thresholds": ["made up"]})
     assert client.get("/api/v1/incidents").json() == []
+
+
+def test_informational_events_join_the_incident_timeline(client, emit):
+    emit("evaluator.verdict", "sentinel-evaluator:canary-step", 6001, BROKEN,
+         data={"verdict": "FAIL", "target": "candidate", "error_rate": 0.2, "p95_ms": 50.0,
+               "sample_size": 100, "traffic_percent": 10, "breached_thresholds": ["error_rate"]})
+    emit("rollback.started", "sentinel-rollback:automated", 6001, BROKEN,
+         data={"revision_name": "r1", "traffic_percent": 100, "target": "stable"})
+    types = [e["type"] for e in client.get("/api/v1/incidents/inc-6001/timeline").json()]
+    assert types == ["evaluator.verdict", "rollback.started"]
+    assert _status(client, "inc-6001") == "DETECTED"
