@@ -34,6 +34,7 @@ class InMemorySentinelRepository(SentinelRepository):
         self.incidents: dict[str, Incident] = {}
         self.events: list[EventRecord] = []
         self.idempotency_keys: set[str] = set()
+        self.correlations: dict[str, str] = {}
 
     # Releases
     def save_release(self, release: Release) -> Release:
@@ -200,6 +201,14 @@ class InMemorySentinelRepository(SentinelRepository):
             self.idempotency_keys.add(key)
             return True
 
+    def link_correlation(self, key: str, incident_id: str) -> None:
+        with self._lock:
+            self.correlations.setdefault(key, incident_id)
+
+    def resolve_correlation(self, key: str) -> str | None:
+        with self._lock:
+            return self.correlations.get(key)
+
     def release_idempotency(self, key: str) -> None:
         with self._lock:
             self.idempotency_keys.discard(key)
@@ -212,3 +221,4 @@ class InMemorySentinelRepository(SentinelRepository):
             self.incidents.clear()
             self.events.clear()
             self.idempotency_keys.clear()
+            self.correlations.clear()

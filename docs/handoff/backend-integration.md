@@ -72,6 +72,10 @@ rejects the event). Add `--incident-id "$INCIDENT_ID"` once an incident exists.
 | 10 redeploy | deploy (fix) | `--type deploy.canary_started --data '{"traffic_percent":10}'` |
 | 11 recovered | evaluator (fix, 100%) | `--type recovery.verified --source sentinel/scripts/evaluator.py --data '{"verdict":"PASS","target":"candidate","traffic_percent":100,"error_rate":0.001,"p95_ms":35,"sample_size":600}'` |
 
+**Incident ids are optional.** The backend opens `inc-<pipeline_id>` from the evaluator's FAIL
+and links later events by pipeline / commit SHA / alias (see "Incident correlation" in
+`docs/backend.md`). Your current scripts work as they are; tested with your real `emit_event.py`.
+
 `repair.proposed` and `merge.completed` come from the **MR webhook** automatically; CI may
 send them too (duplicates are harmless). The repair MR pipeline runs on the MR, so pass the
 incident id to it (e.g. parse it from `CI_MERGE_REQUEST_SOURCE_BRANCH_NAME` = `duo/fix/<incident_id>`).

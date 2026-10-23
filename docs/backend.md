@@ -47,6 +47,24 @@ Release-level events (`pipeline.started`, `deploy.canary_started`, `evaluator.ve
 without an `incident_id` update releases, deployments and health samples, which is what `/status` shows.
 `release_id` defaults to `rel-<first 12 chars of commit_sha>` when CI does not send one.
 
+## Incident correlation (CI jobs do not need to know the incident id)
+
+The team's pipeline does not carry one incident id through every job, so the backend links events itself:
+
+| Situation | What the backend does |
+|---|---|
+| `evaluator.verdict` FAIL (source contains `evaluator`, `target: candidate`, non-empty `breached_thresholds`) and no open incident | Opens `inc-<pipeline_id>` in DETECTED: the evaluator's measurement is the detection (§A5) |
+| Event without `incident_id` | Linked to the open incident of the same `pipeline_id`, or whose broken / fix / merge commit equals `commit_sha` (or `data.fix_sha`) |
+| Event with an unknown `incident_id` (e.g. the evidence job's `inc-<timestamp>`) | Recorded as an alias of the open incident it correlates with; `duo/fix/<alias>` branches resolve too |
+| Second `incident.detected` / second `merge.completed` | No transition; only thresholds / merge SHAs are learnt |
+| Repair MR opens while the incident is EVIDENCE_COLLECTED (flow started by a GitLab trigger, so no `flow.started` arrived) | Records an explicit, labelled `flow.started` ("inferred from repair MR") then REPAIR_PROPOSED |
+| Merge (auto-merge job or MR webhook) | The merge/squash commit becomes part of the fix release, because the redeploy pipeline runs on it |
+| `evaluator.verdict` PASS at `traffic_percent: 100` for the fix/merge commit while REDEPLOYING | RECOVERED (same authority as `recovery.verified`) |
+
+Recovery still requires the evaluator, PASS, 100 % traffic and a commit that is the fix release.
+Covered by `backend/tests/test_team_pipeline_integration.py`, which drives the backend with the
+team's real `sentinel/scripts/emit_event.py` and `report_gate_verdict.py`.
+
 ## Environment variables
 
 | Variable | Purpose | Default | Production |

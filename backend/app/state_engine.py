@@ -272,6 +272,71 @@ def _record_regression_proof(att: RecoveryAttempt, event: dict[str, Any], data: 
         )
 
 
+CLOSED_STATES = {"RECOVERED", *TERMINAL_FAILURE_STATES}
+
+
+def _is_open(inc: Incident | None) -> bool:
+    return inc is not None and inc.status.value not in CLOSED_STATES
+
+
+def _norm_sha(sha: object) -> str:
+    return str(sha or "").strip().lower()
+
+
+def link_incident(incident_id: str, pipeline_id: object = None, shas: tuple = (), fix_shas: tuple = ()) -> None:
+    """Record how later events (which may carry no incident_id) find this incident.
+
+    pipeline:<id>  any event from the same pipeline
+    sha:<sha>      any event about this commit (broken release, fix, merge commit)
+    fixsha:<sha>   commits that ARE the fix release (fix SHA, merge/squash commit);
+                   only these can be evaluated to declare RECOVERED
+    """
+    repo = get_repository()
+    if pipeline_id:
+        repo.link_correlation(f"pipeline:{pipeline_id}", incident_id)
+    for sha in shas:
+        if _norm_sha(sha):
+            repo.link_correlation(f"sha:{_norm_sha(sha)}", incident_id)
+    for sha in fix_shas:
+        if _norm_sha(sha):
+            repo.link_correlation(f"sha:{_norm_sha(sha)}", incident_id)
+            repo.link_correlation(f"fixsha:{_norm_sha(sha)}", incident_id)
+
+
+def resolve_incident_for(event: dict[str, Any]) -> str | None:
+    """Find the open incident an event without (or with an unknown) incident_id belongs to."""
+    repo = get_repository()
+    data = event.get("data") or {}
+    keys = []
+    if event.get("pipeline_id"):
+        keys.append(f"pipeline:{event['pipeline_id']}")
+    for sha in (event.get("commit_sha"), data.get("fix_sha")):
+        if _norm_sha(sha):
+            keys.append(f"sha:{_norm_sha(sha)}")
+    for key in keys:
+        inc_id = repo.resolve_correlation(key)
+        if inc_id and _is_open(repo.get_incident(inc_id)):
+            return inc_id
+    return None
+
+
+def _is_fix_release(inc: Incident, att: RecoveryAttempt, sha: object) -> bool:
+    if _sha_matches(_norm_sha(sha), _norm_sha(att.fix_sha)):
+        return True
+    return bool(_norm_sha(sha)) and get_repository().resolve_correlation(f"fixsha:{_norm_sha(sha)}") == inc.id
+
+
+def _evaluator_detects(event: dict[str, Any]) -> bool:
+    data = event.get("data") or {}
+    return (
+        event.get("type") == "evaluator.verdict"
+        and "evaluator" in str(event.get("source", "")).lower()
+        and str(data.get("verdict", "")).upper() == "FAIL"
+        and (data.get("target") or "candidate") == "candidate"
+        and bool(data.get("breached_thresholds"))
+    )
+
+
 def process_event_state_transition(event: dict[str, Any]) -> dict[str, Any] | None:
     """
     Apply one authenticated CI event to its incident. Raises HTTPException (409/422)
@@ -284,8 +349,23 @@ def process_event_state_transition(event: dict[str, Any]) -> dict[str, Any] | No
     incident_id = event.get("incident_id")
     data = event.get("data", {}) or {}
 
-    if not incident_id and event_type == "incident.detected":
-        incident_id = data.get("incident_id") or f"inc-{event.get('job_id')}"
+    # --- Correlation: CI jobs do not always know the incident id (see docs/backend.md).
+    if incident_id and repo.get_incident(incident_id) is None:
+        alias = repo.resolve_correlation(f"alias:{incident_id}")
+        resolved = alias or (resolve_incident_for(event) if event_type in STATE_EVENT_TYPES else None)
+        if resolved:
+            repo.link_correlation(f"alias:{incident_id}", resolved)
+            incident_id = resolved
+    if not incident_id and event_type in STATE_EVENT_TYPES:
+        incident_id = resolve_incident_for(event)
+    if not incident_id and (event_type == "incident.detected" or _evaluator_detects(event)):
+        # The evaluator's measured FAIL is the authoritative detection (§A5).
+        incident_id = data.get("incident_id") or (
+            f"inc-{event.get('pipeline_id')}" if event_type == "evaluator.verdict" else f"inc-{event.get('job_id')}"
+        )
+        if event_type == "evaluator.verdict" and repo.get_incident(incident_id) is not None:
+            incident_id = f"{incident_id}-{event.get('job_id')}"  # closed incident from an earlier run
+    if incident_id:
         event["incident_id"] = incident_id
 
     if not incident_id:
@@ -295,23 +375,29 @@ def process_event_state_transition(event: dict[str, Any]) -> dict[str, Any] | No
     if event_type not in STATE_EVENT_TYPES:
         return inc.model_dump() if inc else None
     if inc is None:
-        if event_type != "incident.detected":
+        if event_type not in ("incident.detected", "evaluator.verdict"):
             _reject(
                 "UNKNOWN_INCIDENT",
                 f"Incident {incident_id} has not been opened by an incident.detected event yet.",
                 retryable=True,
             )
+        if event_type == "evaluator.verdict" and not _evaluator_detects(event):
+            return None  # a verdict that detects nothing opens nothing
         if not data.get("breached_thresholds"):
             _insufficient("incident.detected requires measured data.breached_thresholds.")
         inc = _new_incident(incident_id, event, data)
         repo.save_incident(inc)
+        link_incident(incident_id, pipeline_id=event.get("pipeline_id"), shas=(event.get("commit_sha"),))
         return inc.model_dump()
 
     att = _attempt(inc)
     previous_status = inc.status.value
 
     if event_type == "incident.detected":
-        _apply_transition(inc, "DETECTED")
+        # A second detection report (e.g. from the evidence job) adds nothing but thresholds.
+        if not inc.breached_thresholds and data.get("breached_thresholds"):
+            inc.breached_thresholds = [str(b) for b in data["breached_thresholds"]]
+        link_incident(inc.id, pipeline_id=event.get("pipeline_id"))
 
     elif event_type == "rollback.completed":
         probe = data.get("post_rollback_probe_ok")
@@ -348,6 +434,7 @@ def process_event_state_transition(event: dict[str, Any]) -> dict[str, Any] | No
         _apply_transition(inc, "REPAIR_PROPOSED")
         att.mr_iid = int(data["mr_iid"])
         att.fix_sha = str(data["fix_sha"])
+        link_incident(inc.id, fix_shas=(att.fix_sha,))
 
     elif event_type in ("regression_proof.verdict", "integrity_gate.verdict"):
         verdict = str(data.get("verdict", "")).upper()
@@ -379,8 +466,19 @@ def process_event_state_transition(event: dict[str, Any]) -> dict[str, Any] | No
             _apply_transition(inc, "VERIFYING")
 
     elif event_type == "merge.completed":
-        if inc.status.value == "VERIFYING" and regression_proven(att) and integrity_passed(att):
+        if inc.status.value in ("MERGED", "REDEPLOYING"):
+            # Second report of the same merge (auto-merge job + MR webhook): just learn the SHAs.
+            link_incident(
+                inc.id,
+                fix_shas=(data.get("merge_commit_sha"), data.get("squash_commit_sha"), event.get("commit_sha")),
+            )
+        elif inc.status.value == "VERIFYING" and regression_proven(att) and integrity_passed(att):
             _apply_transition(inc, "MERGED")
+            # The redeploy pipeline runs on the merge/squash commit, not the MR head.
+            link_incident(
+                inc.id,
+                fix_shas=(data.get("merge_commit_sha"), data.get("squash_commit_sha"), event.get("commit_sha")),
+            )
         else:
             missing = []
             if not regression_proven(att):
@@ -397,10 +495,22 @@ def process_event_state_transition(event: dict[str, Any]) -> dict[str, Any] | No
         _apply_transition(inc, "REDEPLOYING")
 
     elif event_type == "evaluator.verdict":
-        if inc.status.value == "REDEPLOYING" and str(data.get("verdict", "")).upper() == "FAIL":
+        verdict = str(data.get("verdict", "")).upper()
+        if inc.status.value == "REDEPLOYING" and verdict == "FAIL":
             _apply_transition(
                 inc, "REDEPLOY_UNHEALTHY", data.get("reason") or "Evaluator failed the fix release canary."
             )
+        elif (
+            inc.status.value == "REDEPLOYING"
+            and verdict == "PASS"
+            and "evaluator" in source.lower()
+            and data.get("traffic_percent") == 100
+            and (data.get("target") or "candidate") == "candidate"
+            and _is_fix_release(inc, att, event.get("commit_sha"))
+        ):
+            # The post-redeploy evaluator passing the fix release at full traffic is the
+            # authoritative recovery signal (§A5), whether or not CI also sends recovery.verified.
+            _apply_transition(inc, "RECOVERED")
 
     elif event_type == "recovery.verified":
         if "evaluator" not in source.lower():
@@ -414,7 +524,7 @@ def process_event_state_transition(event: dict[str, Any]) -> dict[str, Any] | No
         if verdict == "PASS":
             if "RECOVERED" not in ALLOWED_TRANSITIONS.get(inc.status.value, []):
                 _apply_transition(inc, "RECOVERED")  # raises INVALID_STATE_TRANSITION
-            if not _sha_matches(event.get("commit_sha"), att.fix_sha):
+            if not _is_fix_release(inc, att, event.get("commit_sha")):
                 _reject(
                     "WRONG_RELEASE",
                     "recovery.verified must evaluate the fix release "

@@ -160,6 +160,11 @@ class SqliteSentinelRepository(SentinelRepository):
                 created_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS correlations (
+                key TEXT PRIMARY KEY,
+                incident_id TEXT NOT NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_events_entity ON events(entity_id);
             CREATE INDEX IF NOT EXISTS idx_events_at ON events(at);
             """)
@@ -770,6 +775,17 @@ class SqliteSentinelRepository(SentinelRepository):
             except sqlite3.IntegrityError:
                 return False
 
+    def link_correlation(self, key: str, incident_id: str) -> None:
+        with self._lock, self._get_connection() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO correlations (key, incident_id) VALUES (?, ?)", (key, incident_id)
+            )
+
+    def resolve_correlation(self, key: str) -> str | None:
+        with self._lock, self._get_connection() as conn:
+            row = conn.execute("SELECT incident_id FROM correlations WHERE key = ?", (key,)).fetchone()
+            return row["incident_id"] if row else None
+
     def release_idempotency(self, key: str) -> None:
         with self._lock, self._get_connection() as conn:
             conn.execute("DELETE FROM idempotency_keys WHERE key = ?", (key,))
@@ -787,6 +803,7 @@ class SqliteSentinelRepository(SentinelRepository):
             conn.execute("DELETE FROM releases;")
             conn.execute("DELETE FROM events;")
             conn.execute("DELETE FROM idempotency_keys;")
+            conn.execute("DELETE FROM correlations;")
 
     def close(self) -> None:
         with self._lock:

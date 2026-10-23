@@ -136,6 +136,14 @@ class SentinelRepository(ABC):
         """
 
     @abstractmethod
+    def link_correlation(self, key: str, incident_id: str) -> None:
+        """Map a correlation key (pipeline:<id>, sha:<sha>, alias:<id>) to an incident. First link wins."""
+
+    @abstractmethod
+    def resolve_correlation(self, key: str) -> str | None:
+        """Return the incident id linked to a correlation key, if any."""
+
+    @abstractmethod
     def release_idempotency(self, key: str) -> None:
         """Forget an idempotency key so a retryable rejection can be retried by CI."""
 

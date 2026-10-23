@@ -46,6 +46,9 @@ def incident_for_branch(branch: str | None) -> str | None:
     for cand in candidates:
         if repo.get_incident(cand) is not None:
             return cand
+        alias = repo.resolve_correlation(f"alias:{cand}")
+        if alias:
+            return alias
     return None
 
 
@@ -60,7 +63,11 @@ def _apply_mr_event(attrs: dict[str, Any], entity_id: str) -> tuple[str | None, 
         data = {"mr_iid": attrs.get("iid"), "fix_sha": (attrs.get("last_commit") or {}).get("id")}
     elif action == "merge":
         event_type = "merge.completed"
-        data = {"mr_iid": attrs.get("iid")}
+        data = {
+            "mr_iid": attrs.get("iid"),
+            "merge_commit_sha": attrs.get("merge_commit_sha"),
+            "squash_commit_sha": attrs.get("squash_commit_sha"),
+        }
     else:
         return incident_id, None
     event = {
@@ -72,8 +79,40 @@ def _apply_mr_event(attrs: dict[str, Any], entity_id: str) -> tuple[str | None, 
         "data": data,
     }
     try:
+        inferred = False
+        current = get_repository().get_incident(incident_id)
+        if event_type == "repair.proposed" and current is not None and current.status.value == "EVIDENCE_COLLECTED":
+            # The Duo flow was started by GitLab (e.g. a "Pipeline failed" trigger), so no
+            # flow.started reached us. The repair MR on duo/fix/<id> proves the investigation ran:
+            # record that step explicitly instead of skipping it.
+            process_event_state_transition({
+                "type": "flow.started",
+                "source": "gitlab/webhook (inferred from repair MR)",
+                "incident_id": incident_id,
+                "job_id": f"mr-{entity_id}-inferred",
+                "commit_sha": event["commit_sha"],
+                "data": {"flow_session_id": f"inferred-from-mr-{attrs.get('iid')}"},
+            })
+            inferred = True
+            get_repository().save_event(
+                EventRecord(
+                    id=f"evt-gl-inferred-{incident_id}-{attrs.get('iid')}",
+                    entity_type="Incident",
+                    entity_id=incident_id,
+                    type="flow.started",
+                    source="gitlab/webhook (inferred from repair MR)",
+                    source_job_id=f"mr-{entity_id}",
+                    at=datetime.now(UTC).isoformat(),
+                    data={"incident_id": incident_id, "flow_session_id": f"inferred-from-mr-{attrs.get('iid')}",
+                          "inferred": True},
+                    summary="Investigation inferred: the Duo flow opened a repair MR (flow was started by GitLab).",
+                )
+            )
         inc = process_event_state_transition(event)
-        return incident_id, {"applied": event_type, "incident_status": inc.get("status") if inc else None}
+        outcome = {"applied": event_type, "incident_status": inc.get("status") if inc else None}
+        if inferred:
+            outcome["inferred_investigating"] = True
+        return incident_id, outcome
     except HTTPException as exc:
         detail = exc.detail.get("error", {}) if isinstance(exc.detail, dict) else {}
         return incident_id, {"rejected": event_type, "code": detail.get("code"), "message": detail.get("message")}
