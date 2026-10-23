@@ -1,6 +1,6 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -9,7 +9,6 @@ from app.config import settings
 from app.routes.events import router as events_router
 from app.routes.health import router as health_router
 from app.routes.incidents import router as incidents_router
-from app.routes.releases import _ensure_initial_release
 from app.routes.releases import router as releases_router
 from app.routes.status import router as status_router
 from app.routes.webhooks import router as webhooks_router
@@ -17,7 +16,7 @@ from app.routes.webhooks import router as webhooks_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    _ensure_initial_release()
+    settings.validate_for_startup()
     yield
 
 
@@ -33,9 +32,10 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    # The dashboard only reads. Browsers may not POST: writes come from CI (HMAC) only.
+    allow_credentials=False,
+    allow_methods=["GET"],
+    allow_headers=["Content-Type"],
 )
 
 
@@ -51,6 +51,21 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
                 "retryable": False,
             }
         },
+    )
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Contract §A8: errors are {error: {code, message, retryable}}.
+    `detail` is kept as a deprecated alias for older clients/tests."""
+    if isinstance(exc.detail, dict) and "error" in exc.detail:
+        error = exc.detail["error"]
+    else:
+        error = {"code": f"HTTP_{exc.status_code}", "message": str(exc.detail), "retryable": False}
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": error, "detail": {"error": error}},
+        headers=getattr(exc, "headers", None),
     )
 
 

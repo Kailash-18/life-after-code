@@ -104,12 +104,44 @@ paths:
                   received_at:
                     type: string
                     format: date-time
+                  incident_id:
+                    type: [string, "null"]
+                    description: Incident the event was applied to (assigned for incident.detected without one).
+                  incident_status:
+                    type: [string, "null"]
+                    description: Incident status after the event was applied.
+                  note:
+                    type: string
+                    description: Present only when the event was a duplicate (same job_id + type).
         '400':
-          $ref: '#/components/responses/ErrorResponse'
+          description: MALFORMED_EVENT / INVALID_TIMESTAMP (schema or JSON violation)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '401':
-          $ref: '#/components/responses/ErrorResponse'
+          description: INVALID_SIGNATURE / MISSING_TIMESTAMP / TIMESTAMP_EXPIRED
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '409':
-          $ref: '#/components/responses/ErrorResponse'
+          description: >
+            INVALID_STATE_TRANSITION (state skip), WRONG_RELEASE (recovery not for the fix SHA),
+            UNKNOWN_INCIDENT (retryable: incident.detected not received yet).
+            Non-retryable rejections are still written to the timeline with rejected=true.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: >
+            INSUFFICIENT_EVIDENCE (transition lacks the evidence §A5 requires) or
+            SECRET_DETECTED (credential-like value in payload; the value is never echoed).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
 
   /api/v1/webhooks/gitlab:
     post:
@@ -177,7 +209,7 @@ paths:
   /api/v1/releases/{id}:
     get:
       summary: Get Release Details
-      description: Returns release metadata, linked deployment stages, and associated health samples.
+      description: Returns release metadata plus a `deployments` array (traffic stage, verdict, evaluator_job_id) recorded from CI events.
       operationId: getReleaseById
       parameters:
         - in: path
@@ -205,7 +237,7 @@ paths:
           name: status
           schema:
             type: string
-            enum: [OPEN, INVESTIGATING, REPAIR_PROPOSED, VERIFYING, MERGED, REDEPLOYING, RECOVERED, TIMED_OUT, VERIFICATION_FAILED, ESCALATED]
+            enum: [DETECTED, ROLLED_BACK, EVIDENCE_COLLECTED, INVESTIGATING, REPAIR_PROPOSED, VERIFYING, MERGED, REDEPLOYING, RECOVERED, ROLLBACK_FAILED, INVESTIGATION_FAILED, VERIFICATION_FAILED, REDEPLOY_UNHEALTHY, TIMED_OUT, ESCALATED]
       responses:
         '200':
           description: List of incidents
@@ -299,11 +331,19 @@ components:
         - traffic_split
         - system_health
         - active_incident
+      description: >
+        Every value comes from a recorded CI/evaluator event. Before anything has been
+        measured, current_release is null and system_health fields are null (unknown),
+        never a placeholder healthy value.
       properties:
         current_release:
-          $ref: '#/components/schemas/Release'
+          oneOf:
+            - $ref: '#/components/schemas/Release'
+            - type: "null"
         candidate_release:
-          $ref: '#/components/schemas/Release'
+          oneOf:
+            - $ref: '#/components/schemas/Release'
+            - type: "null"
         traffic_split:
           type: object
           required:
@@ -324,18 +364,32 @@ components:
             - healthy
           properties:
             error_rate:
-              type: number
+              type: [number, "null"]
               format: float
               example: 0.002
             p95_ms:
-              type: number
+              type: [number, "null"]
               format: float
               example: 45.2
             healthy:
-              type: boolean
+              type: [boolean, "null"]
+              description: null when no evaluator sample exists yet.
               example: true
+            target:
+              type: [string, "null"]
+              enum: [candidate, stable, null]
+            sample_size:
+              type: [integer, "null"]
+            measured_at:
+              type: [string, "null"]
+              format: date-time
+            source:
+              type: string
+              description: Which evaluator sample the numbers came from.
         active_incident:
-          $ref: '#/components/schemas/Incident'
+          oneOf:
+            - $ref: '#/components/schemas/Incident'
+            - type: "null"
 
     Release:
       type: object
@@ -730,8 +784,19 @@ components:
         payload_ref:
           type: string
         summary:
-          type: string
+          type: [string, "null"]
           example: Canary error rate threshold breached (8% > 2% max allowed)
         evidence_url:
-          type: string
+          type: [string, "null"]
           format: uri
+        incident_id:
+          type: string
+        rejected:
+          type: boolean
+          description: true when the backend refused this event; summary carries the reason.
+        artifact_url:
+          type: [string, "null"]
+          description: Same as evidence_url (kept for older clients).
+        data:
+          type: object
+          description: Redacted event payload.

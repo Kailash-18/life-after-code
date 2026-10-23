@@ -200,6 +200,10 @@ class InMemorySentinelRepository(SentinelRepository):
             self.idempotency_keys.add(key)
             return True
 
+    def release_idempotency(self, key: str) -> None:
+        with self._lock:
+            self.idempotency_keys.discard(key)
+
     def clear(self) -> None:
         with self._lock:
             self.releases.clear()

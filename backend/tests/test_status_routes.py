@@ -10,11 +10,11 @@ def test_get_status(client):
     assert "system_health" in data
 
 
-def test_get_releases(client):
+def test_get_releases_empty_until_ci_reports(client):
+    """No seeded/fake releases: history is empty until CI reports one."""
     response = client.get("/api/v1/releases")
     assert response.status_code == 200
-    assert len(response.json()) > 0
-    assert response.json()[0]["id"] == "rel-stable-initial"
+    assert response.json() == []
 
 
 def test_gitlab_webhook_unauthorized(client):

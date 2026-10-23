@@ -770,6 +770,10 @@ class SqliteSentinelRepository(SentinelRepository):
             except sqlite3.IntegrityError:
                 return False
 
+    def release_idempotency(self, key: str) -> None:
+        with self._lock, self._get_connection() as conn:
+            conn.execute("DELETE FROM idempotency_keys WHERE key = ?", (key,))
+
     def clear(self) -> None:
         """Clean all tables for testing isolation."""
         with self._lock, self._get_connection() as conn:

@@ -136,5 +136,9 @@ class SentinelRepository(ABC):
         """
 
     @abstractmethod
+    def release_idempotency(self, key: str) -> None:
+        """Forget an idempotency key so a retryable rejection can be retried by CI."""
+
+    @abstractmethod
     def clear(self) -> None:
         """Reset storage (for test suites)."""

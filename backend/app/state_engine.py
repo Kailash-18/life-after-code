@@ -1,15 +1,31 @@
 """
-Project Sentinel State Engine.
-Enforces the 11-step recovery loop state machine and authoritative source validation.
-Core principle: AI proposes; deterministic gates decide.
-Integrated with the persistence layer (SentinelRepository).
+Project Sentinel State Engine (Task R4).
+
+Enforces the recovery-attempt state machine (§A6) and the source-of-truth rules (§A5).
+Core principle: AI proposes; deterministic gates decide. The backend records truth;
+it never creates it, so every forward transition requires the evidence named in §A5:
+
+  DETECTED            incident.detected with measured breached thresholds
+  ROLLED_BACK         rollback.completed with post_rollback_probe_ok == true
+  EVIDENCE_COLLECTED  evidence.collected with artifact_url + evidence_sha256
+  INVESTIGATING       flow.started with flow_session_id (deadline starts)
+  REPAIR_PROPOSED     repair.proposed / GitLab MR webhook with mr_iid + fix_sha
+  VERIFYING           regression_proof / integrity_gate verdicts being recorded
+  MERGED              merge.completed AND regression proven both ways AND integrity PASS
+                      (a merge without that evidence is recorded as ESCALATED)
+  REDEPLOYING         deploy.canary_started / redeploy.completed
+  RECOVERED           recovery.verified from the evaluator, PASS, for the fix SHA,
+                      at 100% traffic when reported; the evaluator job id is recorded
 """
 
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import HTTPException, status
 
+from app.config import settings
 from app.models.entities import (
+    EventRecord,
     GateKind,
     GateResult,
     GateVerdict,
@@ -60,8 +76,28 @@ ALLOWED_TRANSITIONS = {
     "REDEPLOYING": ["RECOVERED", "REDEPLOY_UNHEALTHY", "ESCALATED"],
 }
 
+
+# Event types that can move an incident. Others (rollback.started, pipeline.started, ...)
+# are recorded in the ledger but never change incident state.
+STATE_EVENT_TYPES = {
+    "incident.detected",
+    "rollback.completed",
+    "evidence.collected",
+    "flow.started",
+    "flow.completed",
+    "repair.proposed",
+    "regression_proof.verdict",
+    "integrity_gate.verdict",
+    "merge.completed",
+    "deploy.canary_started",
+    "redeploy.completed",
+    "evaluator.verdict",
+    "recovery.verified",
+}
+
+
 class _IncidentsStoreProxy(dict):
-    """Dynamic dict proxy backed by SentinelRepository for backward compatibility."""
+    """Read-through dict view of persisted incidents (kept for backward compatibility)."""
 
     def __getitem__(self, key: str):
         inc = get_repository().get_incident(key)
@@ -90,12 +126,47 @@ class _IncidentsStoreProxy(dict):
 INCIDENTS_STORE: dict[str, dict[str, Any]] = _IncidentsStoreProxy()
 
 
-def _sync_to_legacy_dict(incident: Incident) -> dict[str, Any]:
-    """Sync an Incident domain model to the legacy dict representation."""
-    d = incident.model_dump()
-    dict.__setitem__(INCIDENTS_STORE, incident.id, d)
-    return d
+def _reject(code: str, message: str, http_status: int = status.HTTP_409_CONFLICT, retryable: bool = False):
+    raise HTTPException(
+        status_code=http_status,
+        detail={"error": {"code": code, "message": message, "retryable": retryable}},
+    )
 
+
+def _insufficient(message: str):
+    _reject("INSUFFICIENT_EVIDENCE", message, 422)
+
+
+def _sha_matches(a: str | None, b: str | None) -> bool:
+    if not a or not b:
+        return False
+    a, b = a.lower(), b.lower()
+    return a.startswith(b) or b.startswith(a)
+
+
+def _now() -> datetime:
+    return datetime.now(UTC)
+
+
+def _new_incident(incident_id: str, event: dict[str, Any], data: dict[str, Any]) -> Incident:
+    breached = data.get("breached_thresholds") or []
+    return Incident(
+        id=incident_id,
+        release_id=event.get("release_id") or f"rel-{event.get('commit_sha', 'unknown')[:12]}",
+        status=IncidentStatus.DETECTED,
+        detected_at=_now().isoformat(),
+        breached_thresholds=[str(b) for b in breached],
+        evidence_bundle_ref=event.get("artifact_url"),
+        evidence_sha256=data.get("evidence_sha256"),
+        recovery_attempts=[
+            RecoveryAttempt(
+                id=f"att-{incident_id}-1",
+                incident_id=incident_id,
+                attempt_no=1,
+                state=RecoveryState.DETECTED,
+            )
+        ],
+    )
 
 
 def get_or_create_incident(
@@ -104,48 +175,111 @@ def get_or_create_incident(
     repo = get_repository()
     existing = repo.get_incident(incident_id)
     if existing:
-        return _sync_to_legacy_dict(existing)
+        return existing.model_dump()
+    inc = _new_incident(incident_id, {"release_id": release_id, "commit_sha": "unknown"}, data or {})
+    repo.save_incident(inc)
+    return inc.model_dump()
 
-    # Create new incident
-    rel_id = release_id or "rel-unknown"
-    breached = (data.get("breached_thresholds") if data else []) or []
-    if isinstance(breached, list) and breached and isinstance(breached[0], dict):
-        import json
 
-        breached = [json.dumps(b) for b in breached]
+def _apply_transition(inc: Incident, target: str, reason: str | None = None) -> None:
+    current = inc.status.value
+    if target == current:
+        return
+    allowed = ALLOWED_TRANSITIONS.get(current, [])
+    if target not in allowed:
+        _reject(
+            "INVALID_STATE_TRANSITION",
+            f"Illegal state transition from {current} to {target}. Allowed next states: {allowed}.",
+        )
+    inc.status = IncidentStatus(target)
+    if inc.recovery_attempts:
+        att = inc.recovery_attempts[-1]
+        att.state = (
+            RecoveryState(target)
+            if target in RecoveryState._value2member_map_
+            else RecoveryState.FAILED
+        )
+        if target in TERMINAL_FAILURE_STATES:
+            att.failure_reason = reason or f"Failed with {target}"
 
-    new_inc = Incident(
-        id=incident_id,
-        release_id=rel_id,
-        status=IncidentStatus.DETECTED,
-        detected_at=data.get("detected_at") if data and data.get("detected_at") else None or "",
-        breached_thresholds=breached,
-        evidence_bundle_ref=data.get("evidence_bundle_ref") if data else None,
-        evidence_sha256=data.get("evidence_sha256") if data else None,
-        recovery_attempts=[
-            RecoveryAttempt(
-                id=f"att-{incident_id}-1",
-                incident_id=incident_id,
-                attempt_no=1,
-                state=RecoveryState.DETECTED,
-                test_results=[],
-                gate_results=[],
-            )
-        ],
+
+def _attempt(inc: Incident) -> RecoveryAttempt:
+    if not inc.recovery_attempts:
+        inc.recovery_attempts.append(
+            RecoveryAttempt(id=f"att-{inc.id}-1", incident_id=inc.id, attempt_no=1)
+        )
+    return inc.recovery_attempts[-1]
+
+
+def regression_proven(att: RecoveryAttempt) -> bool:
+    broken_ok = any(
+        t.kind == TestKind.REGRESSION_ON_BROKEN
+        and t.outcome == TestOutcome.FAILED
+        and t.failure_type == "AssertionError"
+        for t in att.test_results
     )
-    repo.save_incident(new_inc)
-    return _sync_to_legacy_dict(new_inc)
+    fix_ok = any(
+        t.kind == TestKind.REGRESSION_ON_FIX and t.outcome == TestOutcome.PASSED
+        for t in att.test_results
+    )
+    return broken_ok and fix_ok
+
+
+def integrity_passed(att: RecoveryAttempt) -> bool:
+    integrity = [g for g in att.gate_results if g.gate == GateKind.INTEGRITY]
+    return bool(integrity) and integrity[-1].verdict == GateVerdict.PASS
+
+
+def _record_regression_proof(att: RecoveryAttempt, event: dict[str, Any], data: dict[str, Any], verdict: str) -> None:
+    broken = data.get("broken_run") or {}
+    fix = data.get("fix_run") or {}
+    job = event.get("job_id")
+    junit = event.get("artifact_url")
+
+    def outcome(run: dict[str, Any]) -> TestOutcome | None:
+        o = str(run.get("outcome", "")).lower()
+        return {"passed": TestOutcome.PASSED, "failed": TestOutcome.FAILED, "error": TestOutcome.ERROR}.get(o)
+
+    if outcome(broken):
+        att.test_results.append(
+            TestResult(
+                id=f"tst-{job}-broken",
+                attempt_id=att.id,
+                kind=TestKind.REGRESSION_ON_BROKEN,
+                sha=str(data.get("broken_sha", "")),
+                outcome=outcome(broken),
+                failure_type=broken.get("failure_type"),
+                junit_ref=junit,
+            )
+        )
+    if outcome(fix):
+        att.test_results.append(
+            TestResult(
+                id=f"tst-{job}-fix",
+                attempt_id=att.id,
+                kind=TestKind.REGRESSION_ON_FIX,
+                sha=str(data.get("fix_sha") or event.get("commit_sha", "")),
+                outcome=outcome(fix),
+                failure_type=fix.get("failure_type"),
+                junit_ref=junit,
+            )
+        )
+    if verdict == "PASS" and not regression_proven(att):
+        _insufficient(
+            "regression_proof PASS requires data.broken_run {outcome: failed, failure_type: AssertionError} "
+            "and data.fix_run {outcome: passed}."
+        )
 
 
 def process_event_state_transition(event: dict[str, Any]) -> dict[str, Any] | None:
     """
-    Evaluates an ingested CI event against authoritative source rules
-    and enforces state machine progression without skipping states.
-    Persists updates via SentinelRepository.
+    Apply one authenticated CI event to its incident. Raises HTTPException (409/422)
+    when the event would skip a state or lacks the evidence its transition requires;
+    in that case nothing is persisted for the incident.
     """
     repo = get_repository()
     event_type = event.get("type")
-    source = event.get("source", "")
+    source = str(event.get("source", ""))
     incident_id = event.get("incident_id")
     data = event.get("data", {}) or {}
 
@@ -156,145 +290,188 @@ def process_event_state_transition(event: dict[str, Any]) -> dict[str, Any] | No
     if not incident_id:
         return None
 
-    # Fetch incident from persistence layer
-    inc_model = repo.get_incident(incident_id)
-    if not inc_model:
-        get_or_create_incident(
-            incident_id, release_id=event.get("release_id"), data=data
-        )
-        inc_model = repo.get_incident(incident_id)
+    inc = repo.get_incident(incident_id)
+    if event_type not in STATE_EVENT_TYPES:
+        return inc.model_dump() if inc else None
+    if inc is None:
+        if event_type != "incident.detected":
+            _reject(
+                "UNKNOWN_INCIDENT",
+                f"Incident {incident_id} has not been opened by an incident.detected event yet.",
+                retryable=True,
+            )
+        if not data.get("breached_thresholds"):
+            _insufficient("incident.detected requires measured data.breached_thresholds.")
+        inc = _new_incident(incident_id, event, data)
+        repo.save_incident(inc)
+        return inc.model_dump()
 
-    if not inc_model:
-        return None
+    att = _attempt(inc)
 
-    current_status = inc_model.status.value
-    target_status = None
-
-    # Map events to target status and check authoritative sources
     if event_type == "incident.detected":
-        target_status = "DETECTED"
-        if data.get("breached_thresholds"):
-            inc_model.breached_thresholds = data["breached_thresholds"]
-        if event.get("artifact_url"):
-            inc_model.evidence_bundle_ref = event.get("artifact_url")
-            inc_model.evidence_sha256 = data.get("evidence_sha256")
+        _apply_transition(inc, "DETECTED")
 
     elif event_type == "rollback.completed":
-        # Authoritative: Rollback job + post-rollback probe
-        probe_ok = data.get("post_rollback_probe_ok", True)
-        target_status = "ROLLED_BACK" if probe_ok else "ROLLBACK_FAILED"
+        probe = data.get("post_rollback_probe_ok")
+        if probe is True:
+            _apply_transition(inc, "ROLLED_BACK")
+        elif probe is False:
+            _apply_transition(inc, "ROLLBACK_FAILED", data.get("reason") or "Post-rollback probe failed.")
+        else:
+            _insufficient("rollback.completed requires data.post_rollback_probe_ok (true/false).")
 
     elif event_type == "evidence.collected":
-        target_status = "EVIDENCE_COLLECTED"
-        if event.get("artifact_url"):
-            inc_model.evidence_bundle_ref = event.get("artifact_url")
-        if data.get("evidence_sha256"):
-            inc_model.evidence_sha256 = data.get("evidence_sha256")
+        if not event.get("artifact_url") or not data.get("evidence_sha256"):
+            _insufficient("evidence.collected requires artifact_url and data.evidence_sha256.")
+        inc.evidence_bundle_ref = event["artifact_url"]
+        inc.evidence_sha256 = data["evidence_sha256"]
+        _apply_transition(inc, "EVIDENCE_COLLECTED")
 
     elif event_type == "flow.started":
-        target_status = "INVESTIGATING"
-        if data.get("flow_session_id") and inc_model.recovery_attempts:
-            inc_model.recovery_attempts[-1].flow_session_id = data["flow_session_id"]
+        if not data.get("flow_session_id"):
+            _insufficient("flow.started requires data.flow_session_id.")
+        _apply_transition(inc, "INVESTIGATING")
+        att.flow_session_id = str(data["flow_session_id"])
+        att.deadline_at = (_now() + timedelta(minutes=settings.flow_timeout_minutes)).isoformat()
+
+    elif event_type == "flow.completed":
+        if str(data.get("verdict", "")).upper() == "FAIL":
+            _apply_transition(
+                inc, "INVESTIGATION_FAILED", data.get("reason") or "Investigation flow reported failure."
+            )
 
     elif event_type == "repair.proposed":
-        target_status = "REPAIR_PROPOSED"
-        if inc_model.recovery_attempts:
-            att = inc_model.recovery_attempts[-1]
-            att.mr_iid = data.get("mr_iid")
-            att.fix_sha = data.get("fix_sha")
+        if not data.get("mr_iid") or not data.get("fix_sha"):
+            _insufficient("repair.proposed requires data.mr_iid and data.fix_sha.")
+        _apply_transition(inc, "REPAIR_PROPOSED")
+        att.mr_iid = int(data["mr_iid"])
+        att.fix_sha = str(data["fix_sha"])
 
     elif event_type in ("regression_proof.verdict", "integrity_gate.verdict"):
-        verdict = data.get("verdict", "").upper()
-        if verdict in ("FAIL", "FAILED"):
-            target_status = "VERIFICATION_FAILED"
+        verdict = str(data.get("verdict", "")).upper()
+        if verdict not in ("PASS", "FAIL"):
+            _insufficient(f"{event_type} requires data.verdict PASS or FAIL.")
+        if inc.status.value not in ("REPAIR_PROPOSED", "VERIFYING"):
+            _reject(
+                "INVALID_STATE_TRANSITION",
+                f"Gate verdicts are only accepted in REPAIR_PROPOSED/VERIFYING, not {inc.status.value}.",
+            )
+        if event_type == "integrity_gate.verdict":
+            att.gate_results.append(
+                GateResult(
+                    id=f"gte-{event.get('job_id')}",
+                    attempt_id=att.id,
+                    gate=GateKind.INTEGRITY,
+                    verdict=GateVerdict.PASS if verdict == "PASS" else GateVerdict.FAIL,
+                    findings=[str(f) for f in data.get("findings", [])],
+                    report_ref=event.get("artifact_url"),
+                )
+            )
         else:
-            target_status = "VERIFYING"
-        if inc_model.recovery_attempts:
-            att = inc_model.recovery_attempts[-1]
-            if event_type == "integrity_gate.verdict":
-                gr_verdict = GateVerdict.PASS if verdict == "PASS" else GateVerdict.FAIL
-                att.gate_results.append(
-                    GateResult(
-                        id=f"gte-{event.get('job_id')}",
-                        attempt_id=att.id,
-                        gate=GateKind.INTEGRITY,
-                        verdict=gr_verdict,
-                        findings=data.get("findings", []),
-                        report_ref=event.get("artifact_url"),
-                    )
-                )
-            else:
-                tr_outcome = TestOutcome.PASSED if verdict == "PASS" else TestOutcome.FAILED
-                att.test_results.append(
-                    TestResult(
-                        id=f"tst-{event.get('job_id')}",
-                        attempt_id=att.id,
-                        kind=TestKind.REGRESSION_ON_FIX,
-                        sha=event.get("commit_sha", ""),
-                        outcome=tr_outcome,
-                    )
-                )
+            _record_regression_proof(att, event, data, verdict)
+        if verdict == "FAIL":
+            _apply_transition(
+                inc, "VERIFICATION_FAILED", data.get("reason") or f"{event_type} reported FAIL."
+            )
+        else:
+            _apply_transition(inc, "VERIFYING")
 
     elif event_type == "merge.completed":
-        target_status = "MERGED"
+        if inc.status.value == "VERIFYING" and regression_proven(att) and integrity_passed(att):
+            _apply_transition(inc, "MERGED")
+        else:
+            missing = []
+            if not regression_proven(att):
+                missing.append("regression proof (fails on broken, passes on fix)")
+            if not integrity_passed(att):
+                missing.append("Integrity Gate PASS")
+            if inc.status.value != "VERIFYING":
+                missing.append(f"VERIFYING state (was {inc.status.value})")
+            _apply_transition(
+                inc, "ESCALATED", "Merge reported without required gate evidence: " + ", ".join(missing)
+            )
 
     elif event_type in ("deploy.canary_started", "redeploy.completed"):
-        target_status = "REDEPLOYING"
+        _apply_transition(inc, "REDEPLOYING")
+
+    elif event_type == "evaluator.verdict":
+        if inc.status.value == "REDEPLOYING" and str(data.get("verdict", "")).upper() == "FAIL":
+            _apply_transition(
+                inc, "REDEPLOY_UNHEALTHY", data.get("reason") or "Evaluator failed the fix release canary."
+            )
 
     elif event_type == "recovery.verified":
-        # CRITICAL AUTHORITATIVE CHECK:
-        # §A5: Only a post-redeploy evaluator job can declare RECOVERED.
-        # AI output or generic CI jobs cannot declare recovery.
-        is_evaluator_source = "evaluator" in source.lower()
-        verdict = data.get("verdict", "").upper()
-
-        if not is_evaluator_source:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={
-                    "error": {
-                        "code": "UNAUTHORITATIVE_SOURCE",
-                        "message": f"Source '{source}' is not authoritative for declaring recovery. Only post-deploy evaluator may verify recovery.",
-                        "retryable": False,
-                    }
-                },
+        if "evaluator" not in source.lower():
+            _reject(
+                "UNAUTHORITATIVE_SOURCE",
+                f"Source '{source}' is not authoritative for declaring recovery. "
+                "Only the post-deploy evaluator may verify recovery.",
+                status.HTTP_400_BAD_REQUEST,
             )
-
+        verdict = str(data.get("verdict", "")).upper()
         if verdict == "PASS":
-            target_status = "RECOVERED"
-        else:
-            target_status = "REDEPLOY_UNHEALTHY"
-
-    if not target_status or target_status == current_status:
-        repo.save_incident(inc_model)
-        return _sync_to_legacy_dict(inc_model)
-
-    # Enforce state machine transitions: no skipped states
-    allowed_next_states = ALLOWED_TRANSITIONS.get(current_status, [])
-    if target_status not in allowed_next_states:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "error": {
-                    "code": "INVALID_STATE_TRANSITION",
-                    "message": f"Illegal state transition from {current_status} to {target_status}. Allowed next states: {allowed_next_states}.",
-                    "retryable": False,
-                }
-            },
-        )
-
-    # Transition state and persist
-    inc_model.status = IncidentStatus(target_status)
-    if inc_model.recovery_attempts:
-        inc_model.recovery_attempts[-1].state = (
-            RecoveryState(target_status)
-            if target_status in RecoveryState._value2member_map_
-            else RecoveryState.FAILED
-        )
-        if target_status in TERMINAL_FAILURE_STATES:
-            inc_model.recovery_attempts[-1].failure_reason = data.get(
-                "reason", f"Failed with {target_status}"
+            if "RECOVERED" not in ALLOWED_TRANSITIONS.get(inc.status.value, []):
+                _apply_transition(inc, "RECOVERED")  # raises INVALID_STATE_TRANSITION
+            if not _sha_matches(event.get("commit_sha"), att.fix_sha):
+                _reject(
+                    "WRONG_RELEASE",
+                    "recovery.verified must evaluate the fix release "
+                    f"(fix_sha={att.fix_sha!r}, event commit_sha={event.get('commit_sha')!r}).",
+                )
+            pct = data.get("traffic_percent")
+            if pct is not None and pct != 100:
+                _insufficient(f"Recovery requires a passing evaluation at 100% traffic, got {pct}%.")
+            _apply_transition(inc, "RECOVERED")
+        elif verdict == "FAIL":
+            _apply_transition(
+                inc, "REDEPLOY_UNHEALTHY", data.get("reason") or "Post-redeploy evaluation failed."
             )
+        else:
+            _insufficient("recovery.verified requires data.verdict PASS or FAIL.")
 
-    repo.save_incident(inc_model)
-    return _sync_to_legacy_dict(inc_model)
+    repo.save_incident(inc)
+    return inc.model_dump()
+
+
+def expire_overdue_attempts() -> list[str]:
+    """
+    Move INVESTIGATING incidents whose flow deadline has passed to TIMED_OUT.
+    Called on reads and writes (Cloud Run has no background scheduler).
+    Returns the ids of incidents that timed out.
+    """
+    repo = get_repository()
+    expired: list[str] = []
+    now = _now()
+    for inc in repo.list_incidents(status=IncidentStatus.INVESTIGATING.value):
+        att = inc.recovery_attempts[-1] if inc.recovery_attempts else None
+        if not att or not att.deadline_at:
+            continue
+        try:
+            deadline = datetime.fromisoformat(att.deadline_at)
+        except ValueError:
+            continue
+        if deadline.tzinfo is None:
+            deadline = deadline.replace(tzinfo=UTC)
+        if deadline > now:
+            continue
+        _apply_transition(
+            inc,
+            "TIMED_OUT",
+            f"Investigation flow {att.flow_session_id} did not propose a repair before {att.deadline_at}.",
+        )
+        repo.save_incident(inc)
+        repo.save_event(
+            EventRecord(
+                id=f"evt-timeout-{inc.id}-{att.attempt_no}",
+                entity_type="Incident",
+                entity_id=inc.id,
+                type="flow.timed_out",
+                source="sentinel/backend/deadline",
+                source_job_id=str(att.flow_session_id or ""),
+                at=now.isoformat(),
+                data={"deadline_at": att.deadline_at},
+                summary="Investigation deadline passed without a repair proposal.",
+            )
+        )
+        expired.append(inc.id)
+    return expired

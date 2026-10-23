@@ -79,15 +79,23 @@
     },
     "data": {
       "type": "object",
-      "description": "Event-specific payload containing deterministic measurements or outcomes.",
+      "description": "Event-specific payload. Backend requirements per type (409/422 otherwise): incident.detected needs breached_thresholds[]; rollback.completed needs post_rollback_probe_ok; evidence.collected needs top-level artifact_url + evidence_sha256; flow.started needs flow_session_id; repair.proposed needs mr_iid + fix_sha; regression_proof.verdict PASS needs broken_run + fix_run; integrity_gate.verdict needs verdict (+ findings); deploy/evaluator events should carry traffic_percent, and evaluator.verdict / recovery.verified should carry target, error_rate, p95_ms, sample_size; recovery.verified must come from the evaluator, for the fix SHA, at traffic_percent 100. Values that look like credentials are rejected (SECRET_DETECTED).",
       "properties": {
         "verdict": {
           "type": "string",
-          "enum": ["PASS", "FAIL", "WARN", "IN_PROGRESS"]
+          "enum": [
+            "PASS",
+            "FAIL",
+            "WARN",
+            "IN_PROGRESS"
+          ]
         },
         "target": {
           "type": "string",
-          "enum": ["candidate", "stable"]
+          "enum": [
+            "candidate",
+            "stable"
+          ]
         },
         "error_rate": {
           "type": "number",
@@ -112,7 +120,9 @@
         },
         "breached_thresholds": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
         "mr_iid": {
           "type": "integer"
@@ -127,7 +137,86 @@
         },
         "findings": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
+        },
+        "post_rollback_probe_ok": {
+          "type": "boolean",
+          "description": "rollback.completed: required. true -> ROLLED_BACK, false -> ROLLBACK_FAILED."
+        },
+        "flow_session_id": {
+          "type": "string",
+          "description": "flow.started: required. Duo workflow/session id; starts the investigation deadline."
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Human-readable failure reason stored on the attempt for terminal states."
+        },
+        "version": {
+          "type": "string",
+          "description": "pipeline.started: optional release version label."
+        },
+        "image_digest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "broken_sha": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{7,40}$"
+        },
+        "broken_run": {
+          "type": "object",
+          "properties": {
+            "outcome": {
+              "type": "string",
+              "enum": [
+                "passed",
+                "failed",
+                "error"
+              ]
+            },
+            "failure_type": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "exit_code": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "outcome"
+          ],
+          "description": "regression_proof.verdict: required for PASS. Must be outcome=failed, failure_type=AssertionError."
+        },
+        "fix_run": {
+          "type": "object",
+          "properties": {
+            "outcome": {
+              "type": "string",
+              "enum": [
+                "passed",
+                "failed",
+                "error"
+              ]
+            },
+            "failure_type": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "exit_code": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "outcome"
+          ],
+          "description": "regression_proof.verdict: required for PASS. Must be outcome=passed."
         }
       }
     }
