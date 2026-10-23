@@ -201,6 +201,7 @@ def execute_rollback(
     print(f"    Post-Rollback Probe OK: {probe_ok} (Errors: {probe_res['errors']}/{probe_res['samples']})")
 
     report = {
+        "status": "ROLLED_BACK",
         "timestamp": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "service": service_name,
         "candidate_revision": candidate_rev,
@@ -245,6 +246,9 @@ def execute_rollback(
             print(f"[!] Warning: could not emit rollback.completed: {e}", file=sys.stderr)
 
     return report
+
+
+run_rollback = execute_rollback
 
 
 def main() -> None:

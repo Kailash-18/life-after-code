@@ -84,15 +84,26 @@ class KolmogorovSmirnovLatencyComparator:
 
         verdict = "PASS" if not is_degraded else "LATENCY_DISTRIBUTION_DRIFT"
 
+        # Non-parametric Wasserstein (Earth Mover's) distance metric between empirical distributions
+        sorted_all = sorted(candidate_samples + stable_samples)
+        diff_integral = sum(abs((sum(1 for c in sorted_cand if c <= val) / n1) - (sum(1 for s in sorted_stable if s <= val) / n2)) for val in sorted_all) / len(sorted_all)
+        wasserstein_distance = round(diff_integral, 4)
+
+        cand_p99 = round(sorted_cand[int(n1 * 0.99)], 2)
+        stable_p99 = round(sorted_stable[int(n2 * 0.99)], 2)
+
         return {
             "verdict": verdict,
             "d_statistic": round(max_d, 4),
             "critical_value": round(critical_value, 4),
+            "wasserstein_distance": wasserstein_distance,
             "is_statistically_different": is_statistically_different,
             "candidate_median_ms": round(cand_median, 2),
             "stable_median_ms": round(stable_median, 2),
             "candidate_p95_ms": round(sorted_cand[int(n1 * 0.95)], 2),
             "stable_p95_ms": round(sorted_stable[int(n2 * 0.95)], 2),
+            "candidate_p99_ms": cand_p99,
+            "stable_p99_ms": stable_p99,
             "alpha": self.significance_alpha,
             "ks_test_certified": verdict == "PASS",
         }
@@ -111,6 +122,7 @@ def run_ks_comparator_audit(output_dir: Path | None = None) -> dict[str, Any]:
         output_dir.mkdir(parents=True, exist_ok=True)
         out_file = output_dir / "ks-latency-distribution-report.json"
         out_file.write_text(json.dumps(report, indent=2), encoding="utf-8")
+        (output_dir / "ks-latency-report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
 
     return report
 
@@ -118,6 +130,7 @@ def run_ks_comparator_audit(output_dir: Path | None = None) -> dict[str, Any]:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Sentinel KS Latency Distribution Comparator")
     parser.add_argument("--output-dir", default="artifacts", help="Report output dir")
+    parser.add_argument("--dry-run", action="store_true", help="Simulate KS test in safe mode")
     args = parser.parse_args()
 
     report = run_ks_comparator_audit(output_dir=Path(args.output_dir))

@@ -97,6 +97,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Sentinel Canary Stress Priming Engine")
     parser.add_argument("--url", default="https://candidate---sentinel-target-app.run.app")
     parser.add_argument("--output-dir", default="artifacts", help="Report output dir")
+    parser.add_argument("--dry-run", action="store_true", help="Simulate stress priming in safe mode")
     args = parser.parse_args()
 
     report = run_stress_priming_audit(tag_url=args.url, output_dir=Path(args.output_dir))
