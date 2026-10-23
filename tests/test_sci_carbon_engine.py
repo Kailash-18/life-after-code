@@ -50,5 +50,7 @@ def test_run_sci_evaluation_writes_artifact(tmp_path: Path):
     assert report["verdict"] == "PASS"
     out_file = tmp_path / "sci-carbon-intensity-report.json"
     assert out_file.exists()
+    alias_file = tmp_path / "sci-carbon-intensity.json"
+    assert alias_file.exists()
     data = json.loads(out_file.read_text(encoding="utf-8"))
     assert data["specification"] == "ISO/IEC 21031 (Green Software Foundation SCI)"
