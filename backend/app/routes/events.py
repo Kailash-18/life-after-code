@@ -141,6 +141,31 @@ def parse_and_validate_timestamp(ts_str: str | None, max_age_seconds: int = 300)
     return event_dt
 
 
+async def require_ci_signature(
+    request: Request,
+    x_sentinel_signature: str | None = Header(None, alias="X-Sentinel-Signature"),
+    x_sentinel_timestamp: str | None = Header(None, alias="X-Sentinel-Timestamp"),
+) -> None:
+    """
+    Dependency for every non-event write endpoint (e.g. /api/v1/state/*): same scheme as
+    /events. HMAC over the raw body, fresh X-Sentinel-Timestamp, and a signed, fresh
+    `sent_at` inside the JSON body (so a captured request cannot be replayed later).
+    """
+    body = await request.body()
+    if not verify_hmac_signature(body, x_sentinel_signature):
+        raise _error(
+            status.HTTP_401_UNAUTHORIZED, "INVALID_SIGNATURE", "HMAC-SHA256 signature verification failed or missing."
+        )
+    parse_and_validate_timestamp(x_sentinel_timestamp, max_age_seconds=300)
+    try:
+        sent_at = json.loads(body.decode("utf-8") or "{}").get("sent_at")
+    except (json.JSONDecodeError, UnicodeDecodeError, AttributeError):
+        sent_at = None
+    if not sent_at:
+        raise _error(status.HTTP_401_UNAUTHORIZED, "MISSING_TIMESTAMP", "Signed body must contain sent_at.")
+    parse_and_validate_timestamp(str(sent_at), max_age_seconds=300)
+
+
 def _ledger(record: dict[str, Any], rejection: dict[str, Any] | None = None) -> None:
     incident_id = record.get("incident_id")
     data = dict(record["data"])

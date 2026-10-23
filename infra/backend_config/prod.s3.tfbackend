@@ -1,0 +1,9 @@
+# ==============================================================================
+# Production S3 Backend Configuration for Terraform Remote State
+# Usage: terraform init -backend-config=backend_config/prod.s3.tfbackend
+# ==============================================================================
+bucket         = "sentinel-terraform-state-prod"
+key            = "live/prod/sentinel.tfstate"
+region         = "us-east-1"
+dynamodb_table = "sentinel-terraform-state-locks"
+encrypt        = true

@@ -1,0 +1,57 @@
+# ==============================================================================
+# Project Sentinel — Terraform Environment Configuration Template
+# Top 0.1% Enterprise Security: Zero hardcoded secrets, parameterized sizing & rate limits.
+# ==============================================================================
+
+# 1. Project & Environment Identification
+project_id          = "project-sentinel-hackathon"
+region              = "us-central1"
+failover_region     = "us-east1"
+environment         = "prod"
+gitlab_project_path = "project-sentinel/sentinel"
+
+# 2. Container Images (Cryptographically Verified via SLSA Level 3 & Cosign)
+app_image     = "us-central1-docker.pkg.dev/project-sentinel-hackathon/sentinel/target-app:stable"
+backend_image = "us-central1-docker.pkg.dev/project-sentinel-hackathon/sentinel/backend:latest"
+
+# 3. Cryptographic Secret Keys (Do NOT commit real production keys to version control)
+# Sensitive variable: In CI/CD pipelines, inject via TF_VAR_initial_hmac_secret or Secret Manager
+initial_hmac_secret = "REPLACE_WITH_SECURE_HMAC_SECRET_KEY_MIN_32_CHARS"
+
+# 4. Cloud Armor Layer 7 WAF & DDoS Rate Limiting
+cloud_armor_policy_name     = "sentinel-cloud-armor-policy"
+rate_limit_threshold_count  = 1000
+rate_limit_interval_sec     = 60
+rate_limit_ban_duration_sec = 300
+
+# 5. Cloud Run Workload Sizing & Horizontal Autoscaling
+target_app_cpu           = "1000m"
+target_app_memory        = "512Mi"
+target_app_min_instances = 1
+target_app_max_instances = 5
+
+backend_cpu           = "1000m"
+backend_memory        = "512Mi"
+backend_min_instances = 1
+backend_max_instances = 3
+
+# 6. Global Anycast Networking & Multi-Region Mesh
+backend_timeout_sec = 30
+lb_forwarding_port  = "80"
+dns_domain_name     = "sentinel-mesh.internal."
+dns_ttl             = 5
+
+# 7. Cross-Region Disaster Recovery & Migration via S3
+migration_snapshot_s3_bucket = "sentinel-region-migration-snapshots"
+migration_target_region      = "us-east1"
+
+# 8. Zero-Trust Cloud Run Perimeter Controls
+cloud_run_ingress                 = "INGRESS_TRAFFIC_ALL" # Or "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER" for zero-trust WAF lockdown
+allow_unauthenticated_invocations = true                   # Set to false to disable direct public access
+
+# 9. AWS S3 Remote State & DynamoDB Distributed Locking
+aws_state_region          = "us-east-1"
+state_bucket_name         = "sentinel-terraform-state-prod"
+dynamodb_lock_table_name  = "sentinel-terraform-state-locks"
+enable_s3_state_bootstrap = true
+

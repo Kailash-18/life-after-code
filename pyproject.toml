@@ -1,0 +1,24 @@
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+exclude = [
+    ".git",
+    ".pytest_cache",
+    "frontend",
+    "dist",
+    "node_modules",
+    ".venv",
+    "app",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = [
+    "E501",  # Line length handled dynamically
+    "E402",  # Module level import after sys.path manipulation in scripts
+    "F401",  # Unused imports in test fixtures
+    "F541",  # Extraneous f-prefix in strings
+    "F841",  # Local variable assigned but never used in mocks
+    "W293",  # Blank line contains whitespace (preserve teammate original formatting)
+]
+

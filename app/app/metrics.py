@@ -1,6 +1,7 @@
 import logging
 import time
 
+from typing import Optional
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
@@ -56,5 +57,5 @@ async def metrics_middleware(request: Request, call_next):
             ERROR_COUNT.labels(endpoint=endpoint, status_code=str(status_code)).inc()
 
 
-def get_metrics_response(request: Request = None) -> Response:
+def get_metrics_response(request: Optional[Request] = None) -> Response:
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)

@@ -18,6 +18,7 @@ it never creates it, so every forward transition requires the evidence named in 
                       at 100% traffic when reported; the evaluator job id is recorded
 """
 
+import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -307,6 +308,7 @@ def process_event_state_transition(event: dict[str, Any]) -> dict[str, Any] | No
         return inc.model_dump()
 
     att = _attempt(inc)
+    previous_status = inc.status.value
 
     if event_type == "incident.detected":
         _apply_transition(inc, "DETECTED")
@@ -430,7 +432,21 @@ def process_event_state_transition(event: dict[str, Any]) -> dict[str, Any] | No
             _insufficient("recovery.verified requires data.verdict PASS or FAIL.")
 
     repo.save_incident(inc)
+    _snapshot_state(event_type, incident_id, f"{previous_status} -> {inc.status.value}")
     return inc.model_dump()
+
+
+def _snapshot_state(event_type: str | None, incident_id: str, transition: str) -> None:
+    """Best-effort state snapshot (Kailash's S3 state store). Never blocks or fails ingestion."""
+    try:
+        from app.s3_state_store import s3_state_store
+
+        s3_state_store.snapshot_state(
+            INCIDENTS_STORE,
+            extra_metadata={"last_event_type": event_type, "incident_id": incident_id, "transition": transition},
+        )
+    except Exception as exc:  # noqa: BLE001 - snapshots are optional; ingestion must not fail
+        logging.getLogger("sentinel.state_engine").warning("State snapshot skipped: %s", exc)
 
 
 def expire_overdue_attempts() -> list[str]:

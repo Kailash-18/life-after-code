@@ -292,6 +292,163 @@ paths:
         '404':
           $ref: '#/components/responses/ErrorResponse'
 
+  /api/v1/state/storage:
+    get:
+      summary: State snapshot storage status (Kailash, S3 state store)
+      operationId: getStateStorage
+      tags: [state]
+      responses:
+        '200':
+          description: Storage backend and snapshot metadata
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /api/v1/state/snapshots:
+    get:
+      summary: List state snapshots
+      operationId: listStateSnapshots
+      tags: [state]
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Snapshot list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                  snapshots:
+                    type: array
+                    items:
+                      type: object
+
+  /api/v1/state/snapshot:
+    post:
+      summary: Create a state snapshot (CI-signed)
+      description: >
+        Write endpoint. Same authentication as /events: HMAC-SHA256 over the raw body in
+        X-Sentinel-Signature, fresh X-Sentinel-Timestamp, and a fresh `sent_at` in the body.
+      operationId: createStateSnapshot
+      tags: [state]
+      parameters: &ciSignedHeaders
+        - in: header
+          name: X-Sentinel-Signature
+          required: true
+          schema:
+            type: string
+        - in: header
+          name: X-Sentinel-Timestamp
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sent_at]
+              properties:
+                sent_at:
+                  type: string
+                  format: date-time
+                metadata:
+                  type: object
+      responses:
+        '201':
+          description: Snapshot created
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
+
+  /api/v1/state/restore:
+    post:
+      summary: Restore incident state from a snapshot (CI-signed)
+      operationId: restoreStateSnapshot
+      tags: [state]
+      parameters: *ciSignedHeaders
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sent_at, snapshot_id]
+              properties:
+                sent_at:
+                  type: string
+                  format: date-time
+                snapshot_id:
+                  type: string
+      responses:
+        '200':
+          description: Snapshot restored after SHA-256 verification
+          content:
+            application/json:
+              schema:
+                type: object
+        '400':
+          $ref: '#/components/responses/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
+
+  /api/v1/state/rollback:
+    post:
+      summary: Restore a snapshot and attempt a traffic rollback (CI-signed)
+      description: >
+        `status` is SUCCESS only when a real gcloud traffic update ran and the post-rollback
+        probe passed; otherwise STATE_RESTORED_TRAFFIC_NOT_SHIFTED with `traffic_shift` details.
+      operationId: rollbackStateSnapshot
+      tags: [state]
+      parameters: *ciSignedHeaders
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sent_at]
+              properties:
+                sent_at:
+                  type: string
+                  format: date-time
+                snapshot_id:
+                  type: string
+                service_name:
+                  type: string
+                dry_run:
+                  type: boolean
+      responses:
+        '200':
+          description: Outcome of the restore and traffic shift
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, snapshot_id, traffic_shift]
+                properties:
+                  status:
+                    type: string
+                    enum: [SUCCESS, STATE_RESTORED_TRAFFIC_NOT_SHIFTED]
+                  snapshot_id:
+                    type: string
+                  traffic_shift:
+                    type: object
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/ErrorResponse'
+
 components:
   responses:
     ErrorResponse:
