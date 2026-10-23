@@ -99,7 +99,7 @@ def process_release_event(event: dict[str, Any]) -> None:
         if isinstance(pct, int):
             repo.save_deployment(
                 Deployment(
-                    id=f"dep-{event.get('job_id')}",
+                    id=f"dep-{event.get('job_id')}-{pct}",
                     release_id=rel_id,
                     stage=_stage_for(pct),
                     traffic_percent=pct,
@@ -119,7 +119,7 @@ def process_release_event(event: dict[str, Any]) -> None:
             if not isinstance(pct, int):
                 pct = dep.traffic_percent if dep else 0
             dep = Deployment(
-                id=f"dep-{event.get('job_id')}",
+                id=f"dep-{event.get('job_id')}-{pct}",
                 release_id=rel_id,
                 stage=_stage_for(pct),
                 traffic_percent=pct,
@@ -137,7 +137,7 @@ def process_release_event(event: dict[str, Any]) -> None:
         ):
             repo.save_health_sample(
                 HealthSample(
-                    id=f"hs-{event.get('job_id')}-{target}",
+                    id=f"hs-{event.get('job_id')}-{target}-{dep.traffic_percent}",
                     deployment_id=dep.id,
                     target=target if target in ("candidate", "stable") else "candidate",
                     error_rate=float(data["error_rate"]),

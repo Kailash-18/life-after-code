@@ -6,7 +6,7 @@ POST /api/v1/events is the only way CI writes to the backend:
 2. Timestamp freshness, header and signed body `sent_at` (+-300 s)       -> 401
 3. JSON + JSON Schema contract (docs/contracts/event.schema.json)       -> 400
 4. Secret scan: sensitive keys redacted, secret-looking values rejected -> 422
-5. Idempotency on (job_id, type): duplicates acknowledged, not re-applied
+5. Idempotency on (job_id, type[, traffic_percent]): duplicates acknowledged, not re-applied
 6. Release/deploy/health bookkeeping, then incident state machine        -> 409/422
 7. Every accepted *or rejected* event is written to the event ledger
 8. Flow dispatch (if enabled) runs as a background task, never inline
@@ -224,6 +224,9 @@ async def ingest_ci_event(
     # 5. Idempotency on (job_id, type).
     repo = get_repository()
     idempotency_key = f"{payload.job_id}:{payload.type}"
+    # One deploy/evaluate job may step traffic 10 -> 50 -> 100 %: each step is a distinct fact.
+    if isinstance(payload.data.get("traffic_percent"), int):
+        idempotency_key += f":{payload.data['traffic_percent']}"
     if not repo.check_and_set_idempotency(idempotency_key):
         PROCESSED_JOB_EVENTS.add(idempotency_key)
         return {

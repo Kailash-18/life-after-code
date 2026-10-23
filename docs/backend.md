@@ -14,7 +14,7 @@ Contracts: [`docs/contracts/openapi.yaml`](contracts/openapi.yaml) ·
 |---|---|---|
 | R1 skeleton | Implemented | FastAPI, env config, `/api/v1/healthz`, Dockerfile (repo-root build context) |
 | R2 persistence | Implemented | SQLite (default) and in-memory. Firestore/Postgres **not implemented** (team decision pending) |
-| R3 ingest | Implemented | HMAC, ±300 s replay window, schema validation (fail closed), idempotency on `(job_id, type)`, GitLab webhook token |
+| R3 ingest | Implemented | HMAC, ±300 s replay window, schema validation (fail closed), idempotency on `(job_id, type)` plus `traffic_percent` when present (one job may step 10→50→100 %), GitLab webhook token |
 | R4 state machine | Implemented | No skipped states; each transition needs its §A5 evidence (table below) |
 | R5 flow dispatch | Implemented, **API route unverified** | `disabled` (default) or `gitlab_api`; exactly once per attempt; deadline → `TIMED_OUT` |
 | R6 read APIs | Implemented | `/status`, `/releases`, `/incidents`, `/incidents/{id}/timeline`; no seeded or placeholder data |
@@ -99,6 +99,14 @@ with signed synthetic events and checks `/status`, the incident and its timeline
 ```bash
 SENTINEL_API_URL=http://localhost:8000 SENTINEL_HMAC_SECRET=... python backend/scripts/smoke_e2e.py
 ```
+
+## CI client
+
+`backend/scripts/emit_event.py` signs and sends one event from a CI job (stdlib only), retries
+on network errors / 5xx / retryable rejections, and converts `regression_proof.py` and
+`integrity_gate.py` JSON reports (`--from-regression-proof`, `--from-integrity-gate`).
+It exits non-zero when Sentinel rejects an event so the pipeline never looks green by mistake.
+Per-stage commands: [`docs/handoff/backend-integration.md`](handoff/backend-integration.md).
 
 ## Error format
 

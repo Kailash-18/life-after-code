@@ -66,3 +66,21 @@ def test_releases_unknown_id_404(client):
     r = client.get("/api/v1/releases/rel-nope")
     assert r.status_code == 404
     assert r.json()["detail"]["error"]["code"] == "RELEASE_NOT_FOUND"
+
+
+def test_one_job_can_step_traffic(client, hmac_secret):
+    """A single deploy job stepping 10 -> 50 -> 100 % must not be de-duplicated."""
+    for pct in (10, 50, 100):
+        body = ok(send(client, hmac_secret, "deploy.canary_started", commit_sha=FIX_SHA, job_id=4100,
+                       data={"traffic_percent": pct}))
+        assert "note" not in body
+        ok(send(client, hmac_secret, "evaluator.verdict", commit_sha=FIX_SHA, job_id=4101, source=EVALUATOR,
+                data={"verdict": "PASS", "target": "candidate", "traffic_percent": pct,
+                      "error_rate": 0.001, "p95_ms": 30.0, "sample_size": 100}))
+    rel = client.get(f"/api/v1/releases/rel-{FIX_SHA[:12]}").json()
+    assert {d["traffic_percent"] for d in rel["deployments"]} == {10, 50, 100}
+    assert rel["status"] == "STABLE"
+    # A true retry of the same step is still a duplicate.
+    again = ok(send(client, hmac_secret, "deploy.canary_started", commit_sha=FIX_SHA, job_id=4100,
+                    data={"traffic_percent": 50}))
+    assert "Duplicate" in again["note"]

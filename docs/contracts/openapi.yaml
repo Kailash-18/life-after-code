@@ -112,7 +112,7 @@ paths:
                     description: Incident status after the event was applied.
                   note:
                     type: string
-                    description: Present only when the event was a duplicate (same job_id + type).
+                    description: Present only when the event was a duplicate (same job_id + type, and same data.traffic_percent if sent).
         '400':
           description: MALFORMED_EVENT / INVALID_TIMESTAMP (schema or JSON violation)
           content:
@@ -412,10 +412,10 @@ components:
           type: string
           example: 1.0.0
         image_digest:
-          type: string
+          type: [string, "null"]
           example: sha256:4b227777d4dd1fc61c6f884f48641d02b4d121d3fd3a4830c5b7b7f541d15c4e
         revision_name:
-          type: string
+          type: [string, "null"]
           example: target-app-00004-abc
         pipeline_id:
           type: string
@@ -457,13 +457,13 @@ components:
           type: string
           format: date-time
         ended_at:
-          type: string
+          type: [string, "null"]
           format: date-time
         verdict:
-          type: string
+          type: [string, "null"]
           enum: [PASS, FAIL, IN_PROGRESS]
         evaluator_job_id:
-          type: string
+          type: [string, "null"]
           example: '459102'
 
     HealthSample:
@@ -529,10 +529,10 @@ components:
             type: string
           example: ["error_rate > 0.02 (observed 0.08)", "p95_ms > 200ms (observed 450ms)"]
         evidence_bundle_ref:
-          type: string
+          type: [string, "null"]
           example: https://gitlab.com/api/v4/projects/123/jobs/9988/artifacts/evidence.tar.gz
         evidence_sha256:
-          type: string
+          type: [string, "null"]
           example: 7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069
         status:
           type: string
@@ -571,21 +571,23 @@ components:
           enum: [DETECTED, ROLLED_BACK, EVIDENCE_COLLECTED, INVESTIGATING, REPAIR_PROPOSED, VERIFYING, MERGED, REDEPLOYING, RECOVERED, FAILED]
           example: REPAIR_PROPOSED
         flow_session_id:
-          type: string
+          type: [string, "null"]
           example: duo-session-789
         mr_iid:
-          type: integer
+          type: [integer, "null"]
           example: 42
         fix_sha:
-          type: string
+          type: [string, "null"]
           example: d91e4f2a7
         failure_reason:
-          type: string
+          type: [string, "null"]
         deadline_at:
-          type: string
+          type: [string, "null"]
           format: date-time
         analysis:
-          $ref: '#/components/schemas/Analysis'
+          oneOf:
+            - $ref: '#/components/schemas/Analysis'
+            - type: "null"
         test_results:
           type: array
           items:
@@ -622,10 +624,10 @@ components:
             type: string
           example: ["Database connection pool metrics during the spike"]
         suspected_change:
-          type: string
+          type: [string, "null"]
           example: app/routes/orders.py line 45
         file_ref:
-          type: string
+          type: [string, "null"]
           example: sentinel/incidents/inc-20261018-01/analysis.json
 
     TestResult:
@@ -653,10 +655,10 @@ components:
           type: string
           enum: [PASSED, FAILED, ERROR]
         failure_type:
-          type: string
+          type: [string, "null"]
           example: AssertionError
         junit_ref:
-          type: string
+          type: [string, "null"]
           example: https://gitlab.com/api/v4/projects/123/jobs/9989/artifacts/junit.xml
 
     GateResult:
@@ -686,7 +688,7 @@ components:
             type: string
           example: []
         report_ref:
-          type: string
+          type: [string, "null"]
           example: https://gitlab.com/api/v4/projects/123/jobs/9990/artifacts/integrity_report.json
 
     CiEvent:
@@ -782,7 +784,7 @@ components:
           type: string
           format: date-time
         payload_ref:
-          type: string
+          type: [string, "null"]
         summary:
           type: [string, "null"]
           example: Canary error rate threshold breached (8% > 2% max allowed)
