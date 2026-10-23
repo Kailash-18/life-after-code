@@ -8,7 +8,8 @@ ENV PYTHONUNBUFFERED=1 \
     PORT=8000 \
     SENTINEL_ENV=production \
     SENTINEL_EVENT_SCHEMA_PATH=/workspace/contracts/event.schema.json \
-    SENTINEL_SQLITE_PATH=/tmp/sentinel.db
+    SENTINEL_SQLITE_PATH=/tmp/sentinel.db \
+    SENTINEL_STATE_CACHE_DIR=/tmp/sentinel-state
 
 WORKDIR /workspace
 

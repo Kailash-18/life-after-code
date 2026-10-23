@@ -178,3 +178,19 @@ def test_error_body_follows_contract(client):
     assert r.status_code == 404
     assert r.json()["error"]["code"] == "INCIDENT_NOT_FOUND"
     assert set(r.json()["error"]) == {"code", "message", "retryable"}
+
+
+def test_oversized_event_is_rejected(client, hmac_secret):
+    r = send(client, hmac_secret, "pipeline.started", data={"blob": "x" * (300 * 1024)})
+    assert r.status_code == 413
+    assert r.json()["error"]["code"] == "PAYLOAD_TOO_LARGE"
+
+
+def test_gitlab_pipeline_webhook_joins_incident_timeline(client, hmac_secret):
+    drive_to(client, hmac_secret, "inc-gl-pipe", "DETECTED")  # helper uses pipeline 999
+    payload = {"object_kind": "pipeline", "object_attributes": {"id": 999, "status": "failed", "sha": "abc"}}
+    r = client.post("/api/v1/webhooks/gitlab", json=payload, headers={"X-Gitlab-Token": settings.gitlab_webhook_secret})
+    assert r.status_code == 200
+    types = [e["type"] for e in client.get("/api/v1/incidents/inc-gl-pipe/timeline").json()]
+    assert "gitlab.pipeline.failed" in types
+    assert client.get("/api/v1/incidents/inc-gl-pipe").json()["status"] == "DETECTED"

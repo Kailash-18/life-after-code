@@ -23,7 +23,7 @@ from app.config import settings
 from app.models.entities import EventRecord
 from app.persistence.factory import get_repository
 from app.security import sanitize_for_storage
-from app.state_engine import process_event_state_transition
+from app.state_engine import process_event_state_transition, resolve_incident_for
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, status
 
 router = APIRouter(prefix="/api/v1/webhooks", tags=["webhooks"])
@@ -170,6 +170,12 @@ async def gitlab_webhook(
         }
 
     incident_id, outcome = (None, None)
+    if object_kind in ("pipeline", "build"):
+        # GitLab is authoritative for "pipeline/job passed" (§A5): show these on the
+        # incident they belong to (same pipeline id or commit), without moving state.
+        sha = attrs.get("sha") if object_kind == "pipeline" else payload.get("sha")
+        pipeline = attrs.get("id") if object_kind == "pipeline" else payload.get("pipeline_id")
+        incident_id = resolve_incident_for({"pipeline_id": str(pipeline) if pipeline else None, "commit_sha": sha})
     if object_kind == "merge_request":
         incident_id, outcome = _apply_mr_event(attrs, entity_id)
         head_sha = (attrs.get("last_commit") or {}).get("id")

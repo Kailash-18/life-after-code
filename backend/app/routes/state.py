@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from app.routes.events import require_ci_signature
 from app.s3_state_store import s3_state_store
-from app.state_engine import INCIDENTS_STORE
+from app.state_engine import incidents_snapshot, restore_incidents
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +34,18 @@ class StateRollbackRequest(BaseModel):
     dry_run: bool = Field(default=False, description="Simulate rollback without cloud mutation")
 
 
+def _restore(snapshot_id: str) -> dict[str, Any]:
+    """Verify the snapshot's SHA-256, then write its incidents into the repository."""
+    loaded: dict[str, Any] = {}
+    res = s3_state_store.restore_snapshot(snapshot_id, loaded)
+    if res.get("success"):
+        try:
+            res["restored_incidents_count"] = restore_incidents(loaded)
+        except ValueError as exc:  # pydantic ValidationError is a ValueError
+            return {"success": False, "error": f"Snapshot content is not valid incident data: {str(exc)[:200]}"}
+    return res
+
+
 @router.post("/snapshot", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_ci_signature)])
 async def create_state_snapshot(req: StateSnapshotRequest | None = None) -> dict[str, Any]:
     """
@@ -41,7 +53,7 @@ async def create_state_snapshot(req: StateSnapshotRequest | None = None) -> dict
     Persists incident history and recovery attempts to AWS S3 with KMS encryption.
     """
     meta = req.metadata if req else {}
-    summary = s3_state_store.snapshot_state(INCIDENTS_STORE, extra_metadata=meta)
+    summary = s3_state_store.snapshot_state(incidents_snapshot(), extra_metadata=meta)
     return {
         "status": "CREATED",
         "snapshot": summary,
@@ -66,7 +78,7 @@ async def restore_state_snapshot(req: StateRestoreRequest) -> dict[str, Any]:
     Atomically restores Sentinel incident state from an authoritative S3 snapshot
     after verifying the SHA-256 integrity hash.
     """
-    res = s3_state_store.restore_snapshot(req.snapshot_id, INCIDENTS_STORE)
+    res = _restore(req.snapshot_id)
     if not res.get("success"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -104,7 +116,7 @@ async def rollback_state_snapshot(req: StateRollbackRequest | None = None) -> di
             )
         snapshot_id = snapshots[0]["snapshot_id"]
 
-    res = s3_state_store.restore_snapshot(snapshot_id, INCIDENTS_STORE)
+    res = _restore(snapshot_id)
     if not res.get("success"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

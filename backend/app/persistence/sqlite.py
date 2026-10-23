@@ -775,11 +775,10 @@ class SqliteSentinelRepository(SentinelRepository):
             except sqlite3.IntegrityError:
                 return False
 
-    def link_correlation(self, key: str, incident_id: str) -> None:
+    def link_correlation(self, key: str, incident_id: str, replace: bool = False) -> None:
+        verb = "INSERT OR REPLACE" if replace else "INSERT OR IGNORE"
         with self._lock, self._get_connection() as conn:
-            conn.execute(
-                "INSERT OR IGNORE INTO correlations (key, incident_id) VALUES (?, ?)", (key, incident_id)
-            )
+            conn.execute(f"{verb} INTO correlations (key, incident_id) VALUES (?, ?)", (key, incident_id))
 
     def resolve_correlation(self, key: str) -> str | None:
         with self._lock, self._get_connection() as conn:

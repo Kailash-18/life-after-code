@@ -136,8 +136,9 @@ class SentinelRepository(ABC):
         """
 
     @abstractmethod
-    def link_correlation(self, key: str, incident_id: str) -> None:
-        """Map a correlation key (pipeline:<id>, sha:<sha>, alias:<id>) to an incident. First link wins."""
+    def link_correlation(self, key: str, incident_id: str, replace: bool = False) -> None:
+        """Map a correlation key (pipeline:<id>, sha:<sha>, alias:<id>) to an incident.
+        The first link wins unless replace=True."""
 
     @abstractmethod
     def resolve_correlation(self, key: str) -> str | None:

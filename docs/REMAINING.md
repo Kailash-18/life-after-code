@@ -41,6 +41,21 @@ Still open (Kailash's scripts, not changed):
 - `auto_merge.py` falls back to a "simulated merge" with a hard-coded SHA when the GitLab API fails, and
   still emits `merge.completed`.
 
+## Backend audit (Krishna, Oct 24) — fixed
+
+- **Backend container could not start:** the state store created `artifacts/state_cache` at import, which the
+  non-root image user cannot write → `PermissionError`. Cache dir is now `SENTINEL_STATE_CACHE_DIR`
+  (`/tmp/sentinel-state` in the image) and an unwritable path disables the cache instead of crashing.
+- **Snapshots were always empty** (the incident proxy serialised as `{}`), and **restore changed nothing**
+  while reporting success. Snapshots now hold the real incidents; restore writes them back.
+- `/state/storage` claimed S3, versioning and DynamoDB locking that were never checked; now reports what is real.
+- Snapshot files grew without limit (Cloud Run disk is memory): one per state change, capped at 50.
+- A deploy or a stale evaluator FAIL for a commit other than the fix no longer moves the incident.
+- An incident whose flow never opens a repair MR now times out (`SENTINEL_REPAIR_TIMEOUT_MINUTES`, 60).
+- Background tasks and requests can no longer overwrite each other's incident updates (one lock).
+- A commit that fails again after its incident closed opens a fresh incident instead of being lost.
+- GitLab pipeline/job webhooks now appear on the incident timeline; event bodies over 256 KB are refused.
+
 ## Should fix
 
 - **Signing secrets.** Remove the hard-coded HMAC fallbacks (`.gitlab-ci.yml`, `backend/app/config.py`, `emit_event.py`). Set a masked CI variable and a Secret Manager entry instead. (Kailash, Krishna)

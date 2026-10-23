@@ -191,3 +191,22 @@ def test_informational_events_join_the_incident_timeline(client, emit):
     types = [e["type"] for e in client.get("/api/v1/incidents/inc-6001/timeline").json()]
     assert types == ["evaluator.verdict", "rollback.started"]
     assert _status(client, "inc-6001") == "DETECTED"
+
+
+def test_same_commit_failing_again_later_opens_a_fresh_incident(client, emit, hmac_secret):
+    """After an incident closes, its commit/pipeline keys must route new events to the new incident."""
+    from app.persistence.factory import get_repository
+
+    emit("evaluator.verdict", "sentinel-evaluator:canary-step", 7101, BROKEN,
+         data={"verdict": "FAIL", "target": "candidate", "breached_thresholds": ["error_rate"]})
+    repo = get_repository()
+    old = repo.get_incident("inc-7101")
+    old.status = old.status.__class__("ESCALATED")
+    repo.save_incident(old)
+    # Same faulty commit deployed again by a new pipeline and failing again.
+    emit("evaluator.verdict", "sentinel-evaluator:canary-step", 7102, BROKEN,
+         data={"verdict": "FAIL", "target": "candidate", "breached_thresholds": ["error_rate"]})
+    emit("rollback.completed", "sentinel-rollback:automated", 7199, BROKEN,  # other pipeline, routed by SHA
+         data={"post_rollback_probe_ok": True})
+    assert _status(client, "inc-7102") == "ROLLED_BACK"
+    assert _status(client, "inc-7101") == "ESCALATED"

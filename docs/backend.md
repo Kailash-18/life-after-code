@@ -31,11 +31,11 @@ Contracts: [`docs/contracts/openapi.yaml`](contracts/openapi.yaml) ·
 | → EVIDENCE_COLLECTED | `evidence.collected` | `artifact_url` + `data.evidence_sha256` |
 | → INVESTIGATING | `flow.started` (CI, or backend dispatcher) | `data.flow_session_id`; sets `deadline_at` |
 | → INVESTIGATION_FAILED | `flow.completed` with `verdict: FAIL`, or dispatch error | reason recorded |
-| → TIMED_OUT | none: deadline passes while INVESTIGATING | checked on every read and write |
+| → TIMED_OUT | none: deadline passes while EVIDENCE_COLLECTED (no MR / flow) or INVESTIGATING | checked on every read and write |
 | → REPAIR_PROPOSED | `repair.proposed`, or GitLab MR `open` on `duo/fix/<incident_id>` | `mr_iid` + `fix_sha` |
 | → VERIFYING / VERIFICATION_FAILED | `regression_proof.verdict`, `integrity_gate.verdict` | PASS proof needs `broken_run` (failed, AssertionError) **and** `fix_run` (passed) |
 | → MERGED | `merge.completed`, or GitLab MR `merge` | regression proven both ways **and** Integrity Gate PASS. Otherwise → **ESCALATED** |
-| → REDEPLOYING | `deploy.canary_started` / `redeploy.completed` | — |
+| → REDEPLOYING | `deploy.canary_started` / `redeploy.completed` | the deployed commit is the fix or merge commit (a deploy of any other commit is only recorded) |
 | → RECOVERED | `recovery.verified` | source contains `evaluator`, `verdict: PASS`, `commit_sha` = fix SHA, `traffic_percent` 100 if sent. The evaluator job id is recorded on the release's deployment and in the timeline |
 | → REDEPLOY_UNHEALTHY | `recovery.verified` / `evaluator.verdict` FAIL while REDEPLOYING | reason recorded |
 
@@ -79,6 +79,9 @@ team's real `sentinel/scripts/emit_event.py` and `report_gate_verdict.py`.
 | `SENTINEL_EVENT_SCHEMA_PATH` | Event contract location | auto-detected | Set by the Dockerfile |
 | `SENTINEL_FLOW_DISPATCH_MODE` | `disabled` or `gitlab_api` | `disabled` | Choose after spike S1 |
 | `SENTINEL_FLOW_TIMEOUT_MINUTES` | Investigation deadline | `30` | — |
+| `SENTINEL_REPAIR_TIMEOUT_MINUTES` | Deadline for a repair MR / `flow.started` after evidence is collected (EVIDENCE_COLLECTED → TIMED_OUT) | `60` | — |
+| `SENTINEL_STATE_CACHE_DIR` | Writable dir for state snapshots (Kailash's state store). Unwritable → cache disabled, never a crash | `artifacts/state_cache` (`/tmp/sentinel-state` in the image) | — |
+| `SENTINEL_STATE_CACHE_MAX` | Snapshot files kept locally (Cloud Run's filesystem is memory) | `50` | — |
 | `GITLAB_API_URL` | GitLab API base | `https://gitlab.com/api/v4` | — |
 | `GITLAB_PROJECT_ID` | Project the flow runs in | — | Required for `gitlab_api` |
 | `GITLAB_FLOW_TOKEN` | Token for the Flows API (Secret Manager) | — | Required for `gitlab_api`; never logged or sent to the flow |
@@ -157,6 +160,15 @@ docker run -p 8000:8000 \
 SQLite lives in the container's memory-backed filesystem: data is lost on restart and is
 not shared between instances. Until Firestore/Postgres is decided and implemented, deploy
 with `--min-instances=1 --max-instances=1` and accept that a restart clears history.
+
+## State snapshots (`/api/v1/state/*`, Kailash's store)
+
+- Every state **change** writes a snapshot of all incidents (S3 if configured, else the local cache).
+- `POST /state/snapshot|restore|rollback` need the CI HMAC signature.
+- `restore` verifies the snapshot SHA-256 and writes the incidents back into the repository.
+  It restores incidents only (not releases, events or correlations).
+- `rollback` reports `SUCCESS` only when gcloud really moved traffic and the probe passed.
+- Without S3 (boto3 is not in the image) snapshots live in the container and do **not** survive a restart.
 
 ## Known limitations
 

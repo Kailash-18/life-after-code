@@ -201,9 +201,12 @@ class InMemorySentinelRepository(SentinelRepository):
             self.idempotency_keys.add(key)
             return True
 
-    def link_correlation(self, key: str, incident_id: str) -> None:
+    def link_correlation(self, key: str, incident_id: str, replace: bool = False) -> None:
         with self._lock:
-            self.correlations.setdefault(key, incident_id)
+            if replace:
+                self.correlations[key] = incident_id
+            else:
+                self.correlations.setdefault(key, incident_id)
 
     def resolve_correlation(self, key: str) -> str | None:
         with self._lock:

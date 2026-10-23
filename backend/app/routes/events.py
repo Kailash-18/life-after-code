@@ -39,6 +39,8 @@ logger = logging.getLogger("sentinel.events")
 
 router = APIRouter(prefix="/api/v1/events", tags=["events"])
 
+MAX_EVENT_BYTES = 256 * 1024  # events carry references, not artifacts
+
 # Process-local mirrors kept for backward compatibility with older tests.
 PROCESSED_JOB_EVENTS: set[str] = set()
 RECORDED_EVENTS: list[dict[str, Any]] = []
@@ -152,6 +154,8 @@ async def require_ci_signature(
     `sent_at` inside the JSON body (so a captured request cannot be replayed later).
     """
     body = await request.body()
+    if len(body) > MAX_EVENT_BYTES:
+        raise _error(413, "PAYLOAD_TOO_LARGE", f"Body exceeds {MAX_EVENT_BYTES} bytes.")
     if not verify_hmac_signature(body, x_sentinel_signature):
         raise _error(
             status.HTTP_401_UNAUTHORIZED, "INVALID_SIGNATURE", "HMAC-SHA256 signature verification failed or missing."
@@ -199,6 +203,8 @@ async def ingest_ci_event(
     x_sentinel_timestamp: str | None = Header(None, alias="X-Sentinel-Timestamp"),
 ):
     body_bytes = await request.body()
+    if len(body_bytes) > MAX_EVENT_BYTES:
+        raise _error(413, "PAYLOAD_TOO_LARGE", f"Event body exceeds {MAX_EVENT_BYTES} bytes; send evidence as an artifact_url.")
 
     # 1. Access control: only CI holds the HMAC secret.
     if not verify_hmac_signature(body_bytes, x_sentinel_signature):

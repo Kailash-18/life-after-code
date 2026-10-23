@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     # flow itself; a CI job does and reports `flow.started` (fallback route 2).
     flow_dispatch_mode: str = os.getenv("SENTINEL_FLOW_DISPATCH_MODE", "disabled")
     flow_timeout_minutes: int = int(os.getenv("SENTINEL_FLOW_TIMEOUT_MINUTES", "30"))
+    # Deadline for a repair MR after evidence is collected when no flow.started arrives
+    # (flow started by a GitLab trigger). EVIDENCE_COLLECTED -> TIMED_OUT afterwards.
+    repair_timeout_minutes: int = int(os.getenv("SENTINEL_REPAIR_TIMEOUT_MINUTES", "60"))
     gitlab_api_url: str = os.getenv("GITLAB_API_URL", "https://gitlab.com/api/v4")
     gitlab_project_id: str | None = os.getenv("GITLAB_PROJECT_ID")
     gitlab_flow_token: str | None = os.getenv("GITLAB_FLOW_TOKEN")

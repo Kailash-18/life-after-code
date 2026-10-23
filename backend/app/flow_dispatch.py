@@ -24,7 +24,7 @@ from fastapi import HTTPException
 from app.config import settings
 from app.models.entities import EventRecord, IncidentStatus
 from app.persistence.factory import get_repository
-from app.state_engine import _apply_transition, process_event_state_transition
+from app.state_engine import STATE_LOCK, _apply_transition, process_event_state_transition
 
 logger = logging.getLogger("sentinel.flow_dispatch")
 
@@ -140,9 +140,10 @@ def maybe_dispatch(incident_id: str) -> None:
         logger.error("Flow dispatch failed for %s: %s", incident_id, result.error)
         try:
             # EVIDENCE_COLLECTED -> INVESTIGATION_FAILED
-            inc = repo.get_incident(incident_id)
-            _apply_transition(inc, "INVESTIGATION_FAILED", f"Flow dispatch failed: {result.error}")
-            repo.save_incident(inc)
+            with STATE_LOCK:
+                inc = repo.get_incident(incident_id)
+                _apply_transition(inc, "INVESTIGATION_FAILED", f"Flow dispatch failed: {result.error}")
+                repo.save_incident(inc)
         except HTTPException as exc:
             logger.warning("Could not record dispatch failure for %s: %s", incident_id, exc)
             return

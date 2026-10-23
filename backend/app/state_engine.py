@@ -18,7 +18,9 @@ it never creates it, so every forward transition requires the evidence named in 
                       at 100% traffic when reported; the evaluator job id is recorded
 """
 
+import functools
 import logging
+import threading
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -64,7 +66,7 @@ TERMINAL_FAILURE_STATES = [
 ALLOWED_TRANSITIONS = {
     "DETECTED": ["ROLLED_BACK", "ROLLBACK_FAILED", "ESCALATED"],
     "ROLLED_BACK": ["EVIDENCE_COLLECTED", "INVESTIGATION_FAILED", "ESCALATED"],
-    "EVIDENCE_COLLECTED": ["INVESTIGATING", "INVESTIGATION_FAILED", "ESCALATED"],
+    "EVIDENCE_COLLECTED": ["INVESTIGATING", "INVESTIGATION_FAILED", "TIMED_OUT", "ESCALATED"],
     "INVESTIGATING": [
         "REPAIR_PROPOSED",
         "INVESTIGATION_FAILED",
@@ -95,6 +97,36 @@ STATE_EVENT_TYPES = {
     "evaluator.verdict",
     "recovery.verified",
 }
+
+
+# One process-wide lock for every read-modify-write of an incident. Request handlers run on
+# the event loop, but background tasks (flow dispatch, analysis ingestion) run in a thread
+# pool; without this a concurrent update could be lost.
+STATE_LOCK = threading.RLock()
+
+
+def _locked(fn):
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        with STATE_LOCK:
+            return fn(*args, **kwargs)
+
+    return wrapper
+
+
+def incidents_snapshot() -> dict[str, dict[str, Any]]:
+    """Plain-dict copy of every persisted incident (for state snapshots)."""
+    return {inc.id: inc.model_dump(mode="json") for inc in get_repository().list_incidents()}
+
+
+@_locked
+def restore_incidents(incidents: dict[str, Any]) -> int:
+    """Write snapshot incidents back into the repository. Each one is validated first."""
+    repo = get_repository()
+    restored = [Incident.model_validate(data) for data in incidents.values()]
+    for inc in restored:
+        repo.save_incident(inc)
+    return len(restored)
 
 
 class _IncidentsStoreProxy(dict):
@@ -292,15 +324,16 @@ def link_incident(incident_id: str, pipeline_id: object = None, shas: tuple = ()
                    only these can be evaluated to declare RECOVERED
     """
     repo = get_repository()
-    if pipeline_id:
-        repo.link_correlation(f"pipeline:{pipeline_id}", incident_id)
-    for sha in shas:
-        if _norm_sha(sha):
-            repo.link_correlation(f"sha:{_norm_sha(sha)}", incident_id)
-    for sha in fix_shas:
-        if _norm_sha(sha):
-            repo.link_correlation(f"sha:{_norm_sha(sha)}", incident_id)
-            repo.link_correlation(f"fixsha:{_norm_sha(sha)}", incident_id)
+    keys = [f"pipeline:{pipeline_id}"] if pipeline_id else []
+    keys += [f"sha:{_norm_sha(sha)}" for sha in (*shas, *fix_shas) if _norm_sha(sha)]
+    keys += [f"fixsha:{_norm_sha(sha)}" for sha in fix_shas if _norm_sha(sha)]
+    for key in keys:
+        existing = repo.resolve_correlation(key)
+        if existing and existing != incident_id and not _is_open(repo.get_incident(existing)):
+            # A closed incident no longer owns this key (e.g. the same commit fails again later).
+            repo.link_correlation(key, incident_id, replace=True)
+        else:
+            repo.link_correlation(key, incident_id)
 
 
 def resolve_incident_for(event: dict[str, Any]) -> str | None:
@@ -337,6 +370,7 @@ def _evaluator_detects(event: dict[str, Any]) -> bool:
     )
 
 
+@_locked
 def process_event_state_transition(event: dict[str, Any]) -> dict[str, Any] | None:
     """
     Apply one authenticated CI event to its incident. Raises HTTPException (409/422)
@@ -415,7 +449,9 @@ def process_event_state_transition(event: dict[str, Any]) -> dict[str, Any] | No
             _insufficient("evidence.collected requires artifact_url and data.evidence_sha256.")
         inc.evidence_bundle_ref = event["artifact_url"]
         inc.evidence_sha256 = data["evidence_sha256"]
-        _apply_transition(inc, "EVIDENCE_COLLECTED")
+        if inc.status.value != "EVIDENCE_COLLECTED":
+            _apply_transition(inc, "EVIDENCE_COLLECTED")
+            att.deadline_at = (_now() + timedelta(minutes=settings.repair_timeout_minutes)).isoformat()
 
     elif event_type == "flow.started":
         if not data.get("flow_session_id"):
@@ -494,11 +530,14 @@ def process_event_state_transition(event: dict[str, Any]) -> dict[str, Any] | No
             )
 
     elif event_type in ("deploy.canary_started", "redeploy.completed"):
-        _apply_transition(inc, "REDEPLOYING")
+        # Only a deploy of the fix release is the redeploy step. A deploy of any other commit
+        # (e.g. a re-run of the faulty release) is recorded on the timeline but moves nothing.
+        if _is_fix_release(inc, att, event.get("commit_sha")):
+            _apply_transition(inc, "REDEPLOYING")
 
     elif event_type == "evaluator.verdict":
         verdict = str(data.get("verdict", "")).upper()
-        if inc.status.value == "REDEPLOYING" and verdict == "FAIL":
+        if inc.status.value == "REDEPLOYING" and verdict == "FAIL" and _is_fix_release(inc, att, event.get("commit_sha")):
             _apply_transition(
                 inc, "REDEPLOY_UNHEALTHY", data.get("reason") or "Evaluator failed the fix release canary."
             )
@@ -544,7 +583,8 @@ def process_event_state_transition(event: dict[str, Any]) -> dict[str, Any] | No
             _insufficient("recovery.verified requires data.verdict PASS or FAIL.")
 
     repo.save_incident(inc)
-    _snapshot_state(event_type, incident_id, f"{previous_status} -> {inc.status.value}")
+    if inc.status.value != previous_status:
+        _snapshot_state(event_type, incident_id, f"{previous_status} -> {inc.status.value}")
     return inc.model_dump()
 
 
@@ -554,23 +594,29 @@ def _snapshot_state(event_type: str | None, incident_id: str, transition: str) -
         from app.s3_state_store import s3_state_store
 
         s3_state_store.snapshot_state(
-            INCIDENTS_STORE,
+            incidents_snapshot(),
             extra_metadata={"last_event_type": event_type, "incident_id": incident_id, "transition": transition},
         )
     except Exception as exc:  # noqa: BLE001 - snapshots are optional; ingestion must not fail
         logging.getLogger("sentinel.state_engine").warning("State snapshot skipped: %s", exc)
 
 
+@_locked
 def expire_overdue_attempts() -> list[str]:
     """
-    Move INVESTIGATING incidents whose flow deadline has passed to TIMED_OUT.
-    Called on reads and writes (Cloud Run has no background scheduler).
+    Time out attempts whose deadline has passed (Cloud Run has no scheduler, so this runs
+    on every read and write):
+      EVIDENCE_COLLECTED  no repair MR / flow.started within SENTINEL_REPAIR_TIMEOUT_MINUTES
+      INVESTIGATING       flow did not propose a repair within SENTINEL_FLOW_TIMEOUT_MINUTES
     Returns the ids of incidents that timed out.
     """
     repo = get_repository()
     expired: list[str] = []
     now = _now()
-    for inc in repo.list_incidents(status=IncidentStatus.INVESTIGATING.value):
+    waiting = repo.list_incidents(status=IncidentStatus.INVESTIGATING.value) + repo.list_incidents(
+        status=IncidentStatus.EVIDENCE_COLLECTED.value
+    )
+    for inc in waiting:
         att = inc.recovery_attempts[-1] if inc.recovery_attempts else None
         if not att or not att.deadline_at:
             continue
@@ -582,11 +628,11 @@ def expire_overdue_attempts() -> list[str]:
             deadline = deadline.replace(tzinfo=UTC)
         if deadline > now:
             continue
-        _apply_transition(
-            inc,
-            "TIMED_OUT",
-            f"Investigation flow {att.flow_session_id} did not propose a repair before {att.deadline_at}.",
-        )
+        if inc.status == IncidentStatus.INVESTIGATING:
+            reason = f"Investigation flow {att.flow_session_id} did not propose a repair before {att.deadline_at}."
+        else:
+            reason = f"No investigation started and no repair MR opened before {att.deadline_at}."
+        _apply_transition(inc, "TIMED_OUT", reason)
         repo.save_incident(inc)
         repo.save_event(
             EventRecord(
@@ -597,8 +643,8 @@ def expire_overdue_attempts() -> list[str]:
                 source="sentinel/backend/deadline",
                 source_job_id=str(att.flow_session_id or ""),
                 at=now.isoformat(),
-                data={"deadline_at": att.deadline_at},
-                summary="Investigation deadline passed without a repair proposal.",
+                data={"deadline_at": att.deadline_at, "incident_id": inc.id},
+                summary=reason,
             )
         )
         expired.append(inc.id)

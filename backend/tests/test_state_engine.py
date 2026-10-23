@@ -71,7 +71,6 @@ def test_every_skip_is_rejected(client, hmac_secret):
         ("evidence.collected", {"evidence_sha256": EVIDENCE_SHA}, {"artifact_url": EVIDENCE_URL}),
         ("flow.started", {"flow_session_id": "s"}, {}),
         ("repair.proposed", {"mr_iid": 1, "fix_sha": FIX_SHA}, {}),
-        ("deploy.canary_started", {"traffic_percent": 10}, {}),
     ]:
         r = send(client, hmac_secret, etype, inc_id, data=data, **extra)
         assert r.status_code == 409, etype
@@ -213,3 +212,32 @@ def test_detected_event_without_incident_id_appears_in_timeline(client, hmac_sec
     assert inc_id == "inc-4242"
     timeline = client.get(f"/api/v1/incidents/{inc_id}/timeline").json()
     assert [e["type"] for e in timeline] == ["incident.detected"]
+
+
+def test_deploy_of_another_commit_is_informational(client, hmac_secret):
+    """Re-running the faulty release's deploy while the incident is open moves nothing."""
+    inc_id = "inc-deploy-other"
+    drive_to(client, hmac_secret, inc_id, "DETECTED")
+    ok(send(client, hmac_secret, "deploy.canary_started", inc_id, data={"traffic_percent": 10}))
+    assert _status(client, inc_id) == "DETECTED"
+    types = [e["type"] for e in client.get(f"/api/v1/incidents/{inc_id}/timeline").json()]
+    assert "deploy.canary_started" in types
+
+
+def test_deploy_of_fix_before_merge_is_rejected(client, hmac_secret):
+    inc_id = "inc-deploy-early"
+    drive_to(client, hmac_secret, inc_id, "REPAIR_PROPOSED")
+    r = send(client, hmac_secret, "deploy.canary_started", inc_id, data={"traffic_percent": 10}, commit_sha=FIX_SHA)
+    assert r.status_code == 409
+    assert _status(client, inc_id) == "REPAIR_PROPOSED"
+
+
+def test_stale_fail_for_broken_commit_does_not_fail_the_redeploy(client, hmac_secret):
+    inc_id = "inc-stale-fail"
+    drive_to(client, hmac_secret, inc_id, "REDEPLOYING")
+    ok(send(client, hmac_secret, "evaluator.verdict", inc_id, source=EVALUATOR, commit_sha=BROKEN_SHA,
+            data={"verdict": "FAIL", "target": "candidate", "traffic_percent": 10}))
+    assert _status(client, inc_id) == "REDEPLOYING"
+    ok(send(client, hmac_secret, "evaluator.verdict", inc_id, source=EVALUATOR, commit_sha=FIX_SHA,
+            data={"verdict": "FAIL", "target": "candidate", "traffic_percent": 10, "reason": "fix still failing"}))
+    assert _status(client, inc_id) == "REDEPLOY_UNHEALTHY"

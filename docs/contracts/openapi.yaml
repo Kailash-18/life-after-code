@@ -134,6 +134,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+        '413':
+          description: PAYLOAD_TOO_LARGE (body over 256 KB; send evidence as artifact_url)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '422':
           description: >
             INSUFFICIENT_EVIDENCE (transition lacks the evidence §A5 requires) or
@@ -295,6 +301,10 @@ paths:
   /api/v1/state/storage:
     get:
       summary: State snapshot storage status (Kailash, S3 state store)
+      description: >
+        Reports only what is observed: storage_type is AWS_S3_REMOTE_STATE only when an S3
+        client is connected, LOCAL_CACHE_ONLY or NONE otherwise; versioning_enabled is null
+        (not checked); durable_across_restarts says whether snapshots survive a restart.
       operationId: getStateStorage
       tags: [state]
       responses:

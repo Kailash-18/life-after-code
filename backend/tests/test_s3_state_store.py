@@ -110,37 +110,42 @@ def test_state_write_endpoints_reject_unsigned_requests():
 
 
 def test_state_api_endpoints():
-    # 1. Check storage health
+    from app.models.entities import Incident
+    from app.persistence.factory import get_repository
+
+    # 1. Storage status reports what is real: no S3 here, so local cache only.
     resp = client.get("/api/v1/state/storage")
     assert resp.status_code == 200
     data = resp.json()
-    assert data["storage_type"] == "AWS_S3_REMOTE_STATE"
-    assert data["versioning_enabled"] is True
+    assert data["storage_type"] == "LOCAL_CACHE_ONLY"
+    assert data["s3_connected"] is False
+    assert data["versioning_enabled"] is None
+    assert data["durable_across_restarts"] is False
 
-    # 2. Trigger snapshot
-    INCIDENTS_STORE["inc-api-test"] = {
-        "id": "inc-api-test",
-        "release_id": "rel-v1.0.0",
-        "status": "DETECTED",
-        "breached_thresholds": [],
-        "recovery_attempts": [],
-    }
+    # 2. Snapshot contains the incidents actually stored in the repository.
+    repo = get_repository()
+    repo.clear()
+    repo.save_incident(Incident(id="inc-api-test", release_id="rel-v1.0.0", breached_thresholds=["x"]))
     snap_resp = _signed_post("/api/v1/state/snapshot", {"metadata": {"test": "api"}})
     assert snap_resp.status_code == 201
     snap_data = snap_resp.json()
     assert snap_data["status"] == "CREATED"
+    assert snap_data["snapshot"]["active_incidents"] == 1
     snap_id = snap_data["snapshot"]["snapshot_id"]
 
     # 3. List snapshots
     list_resp = client.get("/api/v1/state/snapshots")
     assert list_resp.status_code == 200
-    list_data = list_resp.json()
-    assert list_data["total"] >= 1
+    assert list_resp.json()["total"] >= 1
 
-    # 4. Restore snapshot
+    # 4. Restore really writes the incidents back into the repository.
+    repo.clear()
+    assert client.get("/api/v1/incidents/inc-api-test").status_code == 404
     restore_resp = _signed_post("/api/v1/state/restore", {"snapshot_id": snap_id})
     assert restore_resp.status_code == 200
     assert restore_resp.json()["success"] is True
+    assert restore_resp.json()["restored_incidents_count"] == 1
+    assert client.get("/api/v1/incidents/inc-api-test").json()["status"] == "DETECTED"
 
     # 5. Rollback to snapshot (dry run): state restored, but no traffic was moved,
     #    so the API must not claim a successful traffic shift.
@@ -149,5 +154,43 @@ def test_state_api_endpoints():
     rb_data = rollback_resp.json()
     assert rb_data["snapshot_id"] == snap_id
     assert rb_data["snapshot_integrity_verified"] is True
+    assert rb_data["restored_incidents"] == 1
     assert rb_data["traffic_shift"]["ok"] is False
     assert rb_data["status"] == "STATE_RESTORED_TRAFFIC_NOT_SHIFTED"
+
+
+def test_unwritable_cache_dir_does_not_crash(tmp_path, monkeypatch):
+    """The image runs as a non-root user: an unwritable cache path must not stop the backend."""
+    blocker = tmp_path / "not-a-dir"
+    blocker.write_text("x")
+    monkeypatch.setenv("SENTINEL_STATE_CACHE_DIR", str(blocker / "cache"))
+    store = S3StateStore()
+    assert store.local_cache_enabled is False
+    summary = store.snapshot_state({"inc-1": {"id": "inc-1"}})
+    assert summary["status"] == "NOT_PERSISTED"
+    assert store.get_storage_status()["storage_type"] == "NONE"
+
+
+def test_local_cache_is_bounded(tmp_path, monkeypatch):
+    monkeypatch.setenv("SENTINEL_STATE_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("SENTINEL_STATE_CACHE_MAX", "3")
+    store = S3StateStore()
+    for i in range(6):
+        store.snapshot_state({f"inc-{i}": {"id": f"inc-{i}"}})
+        # distinct ids even within one second (content hash differs)
+    assert len(list(tmp_path.glob("snap-*.json"))) <= 3
+    assert len(store._snapshots_history) <= 3
+
+
+def test_tampered_snapshot_is_not_restored(tmp_path, monkeypatch):
+    import json as _json
+
+    monkeypatch.setenv("SENTINEL_STATE_CACHE_DIR", str(tmp_path))
+    store = S3StateStore()
+    snap = store.snapshot_state({"inc-1": {"id": "inc-1", "status": "DETECTED"}})
+    path = tmp_path / f"{snap['snapshot_id']}.json"
+    payload = _json.loads(path.read_text())
+    payload["incidents"]["inc-1"]["status"] = "RECOVERED"
+    path.write_text(_json.dumps(payload))
+    res = store.restore_snapshot(snap["snapshot_id"], {})
+    assert res["success"] is False and "mismatch" in res["error"]

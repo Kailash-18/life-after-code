@@ -112,3 +112,26 @@ def test_flow_completed_fail_marks_investigation_failed(client, hmac_secret):
     drive_to(client, hmac_secret, inc_id, "INVESTIGATING")
     ok(send(client, hmac_secret, "flow.completed", inc_id, data={"verdict": "FAIL", "reason": "agent stopped"}))
     assert client.get(f"/api/v1/incidents/{inc_id}").json()["status"] == "INVESTIGATION_FAILED"
+
+
+def test_no_repair_after_evidence_times_out(client, hmac_secret):
+    """Flow started by a GitLab trigger never opened an MR: the incident must not hang forever."""
+    inc_id = "inc-evidence-timeout"
+    drive_to(client, hmac_secret, inc_id, "EVIDENCE_COLLECTED")
+    repo = get_repository()
+    inc = repo.get_incident(inc_id)
+    assert inc.recovery_attempts[-1].deadline_at is not None
+    inc.recovery_attempts[-1].deadline_at = (datetime.now(UTC) - timedelta(seconds=1)).isoformat()
+    repo.save_incident(inc)
+    body = client.get(f"/api/v1/incidents/{inc_id}").json()
+    assert body["status"] == "TIMED_OUT"
+    assert "no repair MR" in body["recovery_attempts"][-1]["failure_reason"]
+
+
+def test_flow_started_resets_the_deadline(client, hmac_secret):
+    inc_id = "inc-deadline-reset"
+    drive_to(client, hmac_secret, inc_id, "EVIDENCE_COLLECTED")
+    before = get_repository().get_incident(inc_id).recovery_attempts[-1].deadline_at
+    ok(send(client, hmac_secret, "flow.started", inc_id, data={"flow_session_id": "s-2"}))
+    after = get_repository().get_incident(inc_id).recovery_attempts[-1].deadline_at
+    assert after != before
