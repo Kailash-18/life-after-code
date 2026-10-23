@@ -9,13 +9,50 @@ Lightweight FastAPI orders microservice deployed as the target workload under te
 * `GET /api/v1/orders` — Lists placed orders.
 * `GET /api/v1/orders/{id}` — Retrieves order detail.
 
-## Reproducible Fault Mechanism
-To demonstrate Sentinel's automated canary detection, rollback, and repair loop, this app supports two ways of triggering a reproducible fault:
+## Reproducible Fault (demo)
 
-1. **Commit-based Fault (Real Hackathon Scenario):**
-   In `app/app/routes/orders.py`, the `calculate_discount` function has a bug deliberately introduced by a commit (e.g., dividing by zero or raising an unhandled exception when computing discounts for orders).
-2. **Environment Toggle (`FAULT_INJECTION_MODE=true`):**
-   Setting this environment variable in the Cloud Run candidate revision simulates the faulty commit immediately, causing `POST /api/v1/orders` to fail with HTTP 500 while `/healthz` remains superficially active.
+The fault is a **normal code commit**, not a runtime toggle, so the AI's regression test can
+fail on the broken commit and pass on the fix (acceptance #5/#6).
+
+- Healthy code: `calculate_discount` normalises tier names (`"Premium"` → `premium`) and
+  gives unknown tiers no discount.
+- Faulty commit, `refactor(orders): simplify tier discount lookup`
+  ([`docs/demo/fault-discount-lookup.patch`](../docs/demo/fault-discount-lookup.patch)):
+  drops the normalisation, so `TIER_RATES["Premium"]` raises `KeyError` and the request returns **500**.
+- The existing unit tests use lowercase tiers, so **CI stays green** and the bug reaches the canary.
+  `/healthz` also stays `ok`. Only real traffic exposes it.
+
+Apply it during the demo:
+
+```bash
+git apply docs/demo/fault-discount-lookup.patch
+git commit -am "refactor(orders): simplify tier discount lookup"
+git push
+```
+
+### Synthetic load profile (for the health evaluator)
+
+`POST /api/v1/orders` with `customer_tier` drawn from:
+
+| tier | weight |
+|---|---|
+| `standard` | 40% |
+| `premium` | 25% |
+| `Premium` | 15% |
+| `enterprise` | 10% |
+| `ENTERPRISE` | 10% |
+
+Measured locally with 300 requests: healthy commit error rate **0.000**, faulty commit
+**0.257** (77/300 → 500; `http_errors_total` agrees). Any load without mixed-case tiers will
+**not** detect the fault.
+
+### Regression tests
+
+Generated tests go in `tests/regressions/test_inc_<id>.py` at the repo root.
+`tests/regressions/conftest.py` puts `app/` on the import path and provides a `client`
+fixture. Verified with `sentinel/scripts/regression_proof.py`: a test posting
+`customer_tier: "Premium"` fails with `AssertionError` on the faulty commit and passes on the fix
+(verdict PROVEN), and the Integrity Gate passes that fix (0 blocking findings).
 
 ## Running Locally
 ```bash

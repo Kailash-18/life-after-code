@@ -1,6 +1,3 @@
-from app.config import settings
-
-
 def test_create_order_standard(client):
     payload = {
         "customer_id": "cust-001",
@@ -49,20 +46,3 @@ def test_get_order_by_id(client):
 def test_get_nonexistent_order(client):
     response = client.get("/api/v1/orders/ord-nonexistent")
     assert response.status_code == 404
-
-
-def test_fault_injection_triggers_500(client):
-    # Enable fault injection
-    settings.fault_injection_mode = True
-    try:
-        payload = {
-            "customer_id": "cust-fault-test",
-            "customer_tier": "standard",
-            "items": [{"item_id": "item-fault", "quantity": 1, "unit_price": 10.0}],
-        }
-        response = client.post("/api/v1/orders", json=payload)
-        assert response.status_code == 500
-        assert "Internal discount calculation fault" in response.json()["detail"]
-    finally:
-        # Reset back to healthy
-        settings.fault_injection_mode = False

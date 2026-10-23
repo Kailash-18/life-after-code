@@ -1,6 +1,5 @@
 import uuid
 
-from app.config import settings
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
@@ -35,56 +34,38 @@ class OrderResponse(BaseModel):
 ORDERS_DB = {}
 
 
-def calculate_discount(customer_tier: str, subtotal: float, total_items: int) -> float:
-    """
-    Calculates order discount based on customer tier and volume.
+TIER_RATES = {
+    "standard": 0.0,
+    "premium": 0.10,
+    "enterprise": 0.20,
+}
 
-    NOTE ON REPRODUCIBLE FAULT:
-    In the baseline (healthy) version, this safely computes tier discounts.
-    If FAULT_INJECTION_MODE is active (or in the seeded faulty commit), a bug is triggered:
-    dividing by (total_items - total_items) or failing on tier formatting, resulting in
-    an unhandled 500 error under synthetic load.
-    """
-    if settings.fault_injection_mode:
-        # Reproducible fault: Developer introduced unhandled division/state bug in discount optimizer
-        divisor = total_items - total_items
-        _ = 100 / divisor  # Will raise ZeroDivisionError -> 500 HTTP status
 
-    tier_rates = {
-        "standard": 0.0,
-        "premium": 0.10,
-        "enterprise": 0.20,
-    }
-    rate = tier_rates.get(customer_tier.lower(), 0.0)
+def calculate_discount(customer_tier: str, subtotal: float) -> float:
+    """Tier discount. Tier names arrive from many clients in any casing ("Premium",
+    "ENTERPRISE"), so they are normalised; unknown tiers get no discount."""
+    rate = TIER_RATES.get(customer_tier.strip().lower(), 0.0)
     return round(subtotal * rate, 2)
 
 
 @router.post("", response_model=OrderResponse, status_code=status.HTTP_201_CREATED)
 async def create_order(order: OrderCreate):
-    try:
-        subtotal = sum(item.quantity * item.unit_price for item in order.items)
-        total_items = sum(item.quantity for item in order.items)
-        discount = calculate_discount(order.customer_tier, subtotal, total_items)
-        total = round(subtotal - discount, 2)
+    subtotal = round(sum(item.quantity * item.unit_price for item in order.items), 2)
+    discount = calculate_discount(order.customer_tier, subtotal)
+    total = round(subtotal - discount, 2)
 
-        order_id = f"ord-{uuid.uuid4().hex[:8]}"
-        record = OrderResponse(
-            id=order_id,
-            customer_id=order.customer_id,
-            customer_tier=order.customer_tier,
-            subtotal=subtotal,
-            discount_amount=discount,
-            total_amount=total,
-            status="confirmed",
-        )
-        ORDERS_DB[order_id] = record
-        return record
-    except ZeroDivisionError as e:
-        # Unhandled in faulty version, returns 500
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Internal discount calculation fault: {e!s}",
-        )
+    order_id = f"ord-{uuid.uuid4().hex[:8]}"
+    record = OrderResponse(
+        id=order_id,
+        customer_id=order.customer_id,
+        customer_tier=order.customer_tier,
+        subtotal=subtotal,
+        discount_amount=discount,
+        total_amount=total,
+        status="confirmed",
+    )
+    ORDERS_DB[order_id] = record
+    return record
 
 
 @router.get("", response_model=list[OrderResponse])
