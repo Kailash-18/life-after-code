@@ -68,7 +68,9 @@ function toAnalysis(v: unknown): Analysis | undefined {
 
 function toFindings(v: unknown): GateFinding[] {
   return arr(v).map((f) => (typeof f === 'string'
-    ? { message: f, rule_id: f.match(/RULE_\d+[A-Z_]*/)?.[0] }
+    ? (/^RULE_\d+[A-Z0-9_]*$/.test(f.trim())
+      ? { rule_id: f.trim(), message: 'Only the rule id was reported; the full finding is in the gate report.' }
+      : { message: f, rule_id: f.match(/RULE_\d+[A-Z0-9_]*/)?.[0] })
     : { message: str(obj(f).message) ?? str(obj(f).details) ?? JSON.stringify(f), rule_id: str(obj(f).rule_id), severity: str(obj(f).severity), file: str(obj(f).file) }));
 }
 

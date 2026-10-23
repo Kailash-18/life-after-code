@@ -206,6 +206,14 @@ export interface ProofView { verdict: 'proven' | 'rejected' | 'pending' | 'parti
 export function readProof(a?: RecoveryAttempt): ProofView {
   const last = (k: string) => [...(a?.test_results ?? [])].reverse().find((t) => t.kind === k);
   const broken = last('regression_on_broken'), fix = last('regression_on_fix'), suite = last('suite');
+  // The backend may store the regression-proof job's own verdict instead of the two runs.
+  const job = [...(a?.test_results ?? [])].reverse().find((t) => t.kind === 'regression_proof' || /^(PROVEN|REJECTED)$/i.test(t.outcome));
+  if (job) {
+    const ok = /^(PROVEN|PASS|PASSED)$/i.test(job.outcome);
+    return ok
+      ? { verdict: 'proven', reason: `The regression-proof job reported PROVEN${job.sha ? ` on ${job.sha.slice(0, 8)}` : ''}.`, suite }
+      : { verdict: 'rejected', reason: `The regression-proof job rejected the test${job.failure_type ? `: ${job.failure_type}` : ''}.`, suite };
+  }
   if (!broken && !fix) return { verdict: 'pending', reason: 'No regression-proof results recorded yet.', suite };
   if (!broken || !fix) return { verdict: 'partial', reason: 'Only one of the two required runs is recorded.', broken, fix, suite };
   if (broken.outcome !== 'FAILED') return { verdict: 'rejected', reason: 'The new test did not fail on the broken release, so it does not catch the bug.', broken, fix, suite };

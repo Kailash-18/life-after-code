@@ -2,52 +2,18 @@ import type {
   DisasterRecoveryStatus,
   EBPFTelemetryReport,
   OPAComplianceReport,
-  S3RollbackResult,
   S3StorageStatus,
   SRECompositeHealth,
 } from './types';
 
-
 export const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/$/, '') ?? '';
 export const GITLAB_URL = (import.meta.env.VITE_GITLAB_PROJECT_URL as string | undefined)?.replace(/\/$/, '') ?? '';
 
-export const STORAGE_API_KEY = 'sentinel_api_key';
-export const DEFAULT_SENTINEL_API_KEY = (import.meta.env.VITE_SENTINEL_API_KEY as string | undefined) || 'sk-sentinel-live-9f8a2b3c4d5e';
-
-export function getApiKey(): string {
-  try {
-    return localStorage.getItem(STORAGE_API_KEY) || DEFAULT_SENTINEL_API_KEY;
-  } catch {
-    return DEFAULT_SENTINEL_API_KEY;
-  }
-}
-
-export function setApiKey(key: string): void {
-  try {
-    localStorage.setItem(STORAGE_API_KEY, key.trim());
-    window.dispatchEvent(new CustomEvent('sentinel:apikey:changed', { detail: { apiKey: key.trim() } }));
-  } catch {
-    // fallback
-  }
-}
-
-export function resetApiKey(): void {
-  try {
-    localStorage.removeItem(STORAGE_API_KEY);
-    window.dispatchEvent(new CustomEvent('sentinel:apikey:changed', { detail: { apiKey: DEFAULT_SENTINEL_API_KEY } }));
-  } catch {
-    // fallback
-  }
-}
-
-export function generateRandomApiKey(): string {
-  const chars = '0123456789abcdef';
-  let rand = '';
-  for (let i = 0; i < 32; i++) {
-    rand += chars[Math.floor(Math.random() * chars.length)];
-  }
-  return `sk-sentinel-rot-${rand.slice(0, 16)}`;
-}
+/*
+ * Mission Control is read-only and the backend's read API is unauthenticated, so the browser sends
+ * no credentials. A key compiled into a browser bundle is public anyway; anything that needs a
+ * secret (event ingestion, state changes) belongs to CI, which signs its requests with HMAC.
+ */
 
 export class ApiError extends Error {
   status: number;
@@ -62,13 +28,7 @@ export async function getJSON(path: string, signal?: AbortSignal): Promise<unkno
   const timer = setTimeout(() => ctrl.abort(), 8000);
   signal?.addEventListener('abort', () => ctrl.abort());
   try {
-    const key = getApiKey();
-    const headers: Record<string, string> = { Accept: 'application/json' };
-    if (key) {
-      headers['X-API-Key'] = key;
-      headers['Authorization'] = `Bearer ${key}`;
-    }
-    const res = await fetch(`${API_BASE}${path}`, { signal: ctrl.signal, headers });
+    const res = await fetch(`${API_BASE}${path}`, { signal: ctrl.signal, headers: { Accept: 'application/json' } });
     if (!res.ok) throw new ApiError(res.status, `${res.status} ${res.statusText}`);
     const type = res.headers.get('content-type') ?? '';
     if (!type.includes('json')) throw new ApiError(502, 'The API did not answer with JSON');
@@ -81,168 +41,13 @@ export async function getJSON(path: string, signal?: AbortSignal): Promise<unkno
   }
 }
 
-export async function postJSON(path: string, body?: unknown, signal?: AbortSignal): Promise<unknown> {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 10000);
-  signal?.addEventListener('abort', () => ctrl.abort());
-  try {
-    const key = getApiKey();
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    };
-    if (key) {
-      headers['X-API-Key'] = key;
-      headers['Authorization'] = `Bearer ${key}`;
-    }
-    const res = await fetch(`${API_BASE}${path}`, {
-      method: 'POST',
-      signal: ctrl.signal,
-      headers,
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    if (!res.ok) throw new ApiError(res.status, `${res.status} ${res.statusText}`);
-    return await res.json();
-  } catch (e) {
-    if (e instanceof ApiError) throw e;
-    throw new ApiError(0, ctrl.signal.aborted ? 'The API did not answer in time' : 'The API is unreachable');
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 // ==============================================================================
-// Principal SRE & Telemetry API Client Extensions
+// Optional SRE telemetry readers. They return exactly what the backend says and
+// throw when it does not answer — no stand-in values. (The backend does not serve
+// /api/v1/sre/* yet.)
 // ==============================================================================
-
-export async function getSRECompositeHealth(signal?: AbortSignal): Promise<SRECompositeHealth> {
-  try {
-    return (await getJSON('/api/v1/sre/health', signal)) as SRECompositeHealth;
-  } catch {
-    return {
-      health_score: 95.0,
-      status: 'PASS',
-      error_budget: {
-        burn_rate: 0.1,
-        alert_tier: 'NORMAL',
-        hours_to_exhaustion: 720.0,
-        recommended_action: 'HEALTHY: Error budget consumption well within SLO envelope',
-      },
-      hypothesis_testing: {
-        p_value: 0.84,
-        is_significant: false,
-        interpretation: 'Latency delta within expected statistical variance / null hypothesis retained',
-      },
-      latency_iqr: {
-        median: 22.4,
-        q1: 18.2,
-        q3: 26.5,
-        iqr: 8.3,
-        outlier_threshold: 38.9,
-      },
-      statistical_anomalies_detected: 0,
-    };
-  }
-}
-
-export async function getOPACompliance(signal?: AbortSignal): Promise<OPAComplianceReport> {
-  try {
-    return (await getJSON('/api/v1/sre/opa', signal)) as OPAComplianceReport;
-  } catch {
-    return {
-      timestamp: new Date().toISOString(),
-      policy_package: 'sentinel.security.guardrails',
-      allow: true,
-      compliance_score: 100.0,
-      total_guardrails: 8,
-      violations_count: 0,
-      violations: [],
-      status: 'APPROVED',
-    };
-  }
-}
-
-export async function getEBPFTelemetry(signal?: AbortSignal): Promise<EBPFTelemetryReport> {
-  try {
-    return (await getJSON('/api/v1/sre/ebpf', signal)) as EBPFTelemetryReport;
-  } catch {
-    return {
-      timestamp: new Date().toISOString(),
-      samples_collected: 15,
-      mean_transport_health_score: 96.5,
-      status: 'PASS',
-      latency_decomposition_averages_ms: {
-        dns_resolution: 1.4,
-        tcp_handshake: 2.6,
-        tls_handshake: 6.8,
-        server_ttfb: 18.5,
-      },
-      kernel_socket_aggregates: {
-        total_tcp_retransmits: 0,
-        total_syn_queue_drops: 0,
-        retransmission_rate: 0.0,
-      },
-    };
-  }
-}
-
-export async function getDisasterRecoveryStatus(signal?: AbortSignal): Promise<DisasterRecoveryStatus> {
-  try {
-    return (await getJSON('/api/v1/sre/dr', signal)) as DisasterRecoveryStatus;
-  } catch {
-    return {
-      timestamp: new Date().toISOString(),
-      primary_region: 'us-central1',
-      secondary_region: 'us-east1',
-      active_region: 'us-central1',
-      rto_seconds: 1.85,
-      rpo_seconds: 0.0,
-      status: 'OPTIMAL',
-    };
-  }
-}
-
-export async function getS3StorageStatus(signal?: AbortSignal): Promise<S3StorageStatus> {
-  try {
-    return (await getJSON('/api/v1/state/storage', signal)) as S3StorageStatus;
-  } catch {
-    return {
-      storage_type: 'AWS_S3_REMOTE_STATE',
-      bucket_name: 'sentinel-terraform-state-prod',
-      region: 'us-east-1',
-      prefix: 'sentinel/state/',
-      s3_connected: true,
-      encryption: {
-        algorithm: 'aws:kms',
-        kms_key_id: 'alias/sentinel-tfstate-key-prod',
-        bucket_key_enabled: true,
-      },
-      distributed_locking: {
-        table_name: 'sentinel-terraform-state-locks',
-        status: 'ACTIVE',
-      },
-      versioning_enabled: true,
-      last_sync_timestamp: new Date().toISOString(),
-      total_snapshots_recorded: 14,
-      health: 'HEALTHY',
-    };
-  }
-}
-
-export async function rollbackToS3Snapshot(snapshotId?: string): Promise<S3RollbackResult> {
-  try {
-    return (await postJSON('/api/v1/state/rollback', { snapshot_id: snapshotId })) as S3RollbackResult;
-  } catch {
-    return {
-      status: 'SUCCESS',
-      action: 'ROLLBACK_TO_S3_SNAPSHOT',
-      snapshot_id: snapshotId || 'snap-latest-s3-verified',
-      restored_revision: 'sentinel-target-app-known-good-rev001',
-      restored_incidents: 8,
-      traffic_split: { stable_percent: 100, candidate_percent: 0 },
-      sha256: 'e85f5383b1435dadf64d4dcf3b35116c5ede5e6b6c752e03fc2f37d0072efeb0',
-      s3_integrity_verified: true,
-    };
-  }
-}
-
+export const getSRECompositeHealth = (signal?: AbortSignal) => getJSON('/api/v1/sre/health', signal) as Promise<SRECompositeHealth>;
+export const getOPACompliance = (signal?: AbortSignal) => getJSON('/api/v1/sre/opa', signal) as Promise<OPAComplianceReport>;
+export const getEBPFTelemetry = (signal?: AbortSignal) => getJSON('/api/v1/sre/ebpf', signal) as Promise<EBPFTelemetryReport>;
+export const getDisasterRecoveryStatus = (signal?: AbortSignal) => getJSON('/api/v1/sre/dr', signal) as Promise<DisasterRecoveryStatus>;
+export const getS3StorageStatus = (signal?: AbortSignal) => getJSON('/api/v1/state/storage', signal) as Promise<S3StorageStatus>;

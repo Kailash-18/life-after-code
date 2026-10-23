@@ -1,7 +1,9 @@
 # Sentinel Mission Control (frontend)
 
-A full-screen 3D experience for Project Sentinel. React + Vite + TypeScript, Three.js via React Three Fiber,
-postprocessing (bloom, chromatic aberration), GSAP ScrollTrigger and Lenis smooth scroll.
+Mission Control for Project Sentinel: seven read-only consoles over a 3D core whose colour and motion follow
+the recorded state. React + Vite + TypeScript, Three.js via React Three Fiber (light bloom), GSAP ScrollTrigger
+for one-time fade-ins. Motion is deliberately calm: native scrolling, flat cards, no custom cursor, and the core
+only reacts when the recorded state changes. `prefers-reduced-motion` turns the remaining motion off.
 
 ## Run
 
@@ -44,7 +46,7 @@ The demo (`?demo`) carries three incidents: one recovered three days ago, one es
 | AI investigating / proposing | violet scanning ring (advisory) |
 | verifying / merged | cyan, rings speed up |
 | redeploying | mint |
-| RECOVERED | green shockwave, core reassembles — only when the incident record says RECOVERED |
+| RECOVERED | core turns green and settles — only when the incident record says RECOVERED |
 | failure statuses | rose, fractured, frozen |
 
 The nine rings orbiting the core are the nine recovery stages, coloured by their recorded state.

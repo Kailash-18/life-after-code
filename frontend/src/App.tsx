@@ -1,6 +1,5 @@
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
-import Lenis from 'lenis';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { HashRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { SentinelProvider, useSentinel } from './api/source';
@@ -14,84 +13,43 @@ import System from './pages/System';
 import { bus } from './state/bus';
 import { derive, MODE_COLOR, type SceneMode } from './state/derive';
 import { Mission, type SceneOverride } from './state/mission';
-import { ClickWaves, Cursor, MagButton } from './ui/fx';
+import { MagButton } from './ui/fx';
 import { Boot, DemoBanner, TopBar } from './ui/hud';
 import { PAGES, Palette } from './ui/palette';
 
 gsap.registerPlugin(ScrollTrigger);
 const Scene = lazy(() => import('./three/Scene').then((m) => ({ default: m.Scene })));
 
-const LOUD: Partial<Record<SceneMode, number>> = { breach: 2.2, failed: 2, recovered: 2, contained: 1.2, investigating: 1, verifying: 1, redeploying: 1, canary: 0.8 };
-let lenis: Lenis | null = null;
+/** A state change still registers in the core, but as a short, soft pulse. */
+const PULSE: Partial<Record<SceneMode, number>> = { breach: 0.8, failed: 0.7, recovered: 0.6 };
 
-function useSmoothScroll(ready: boolean) {
+/** Native scrolling; the scene only reads how far down the page you are. */
+function useScrollProgress() {
   useEffect(() => {
-    if (!ready) return;
-    lenis = bus.reducedMotion ? null : new Lenis({ lerp: 0.085, smoothWheel: true, wheelMultiplier: 0.9 });
     const onScroll = () => {
       const max = document.documentElement.scrollHeight - innerHeight;
       bus.scroll = max > 0 ? scrollY / max : 0;
-      ScrollTrigger.update();
     };
-    lenis?.on('scroll', onScroll);
+    onScroll();
     addEventListener('scroll', onScroll, { passive: true });
-    const raf = (t: number) => lenis?.raf(t * 1000);
-    gsap.ticker.add(raf);
-    gsap.ticker.lagSmoothing(0);
-    // In-page buttons use scrollIntoView; route them through Lenis for a smooth glide.
-    const orig = Element.prototype.scrollIntoView;
-    const l = lenis;
-    if (l) Element.prototype.scrollIntoView = function (arg?: boolean | ScrollIntoViewOptions) {
-      const center = typeof arg === 'object' && arg?.block === 'center';
-      l.scrollTo(this as HTMLElement, { duration: 1.6, offset: center ? -innerHeight / 2.5 : -80 });
-    };
-    return () => { gsap.ticker.remove(raf); l?.destroy(); lenis = null; removeEventListener('scroll', onScroll); Element.prototype.scrollIntoView = orig; };
-  }, [ready]);
+    return () => removeEventListener('scroll', onScroll);
+  }, []);
 }
 
-function useScrollAnimations(ready: boolean, key: string) {
+/** One gentle fade-up per element, the first time it scrolls into view. */
+function useReveals(ready: boolean, key: string) {
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || bus.reducedMotion) return;
     const ctx = gsap.context(() => {
-      if (!bus.reducedMotion) {
-        ScrollTrigger.batch('[data-reveal]', {
-          start: 'top 92%',
-          onEnter: (els) => gsap.fromTo(els, { y: 70, opacity: 0, rotateX: -28, filter: 'blur(10px)' }, { y: 0, opacity: 1, rotateX: 0, filter: 'blur(0px)', duration: 1.1, stagger: 0.06, ease: 'expo.out', overwrite: true, clearProps: 'filter' }),
-        });
-        gsap.utils.toArray<HTMLElement>('.stampcard').forEach((el, i) => {
-          gsap.fromTo(el.querySelector('[data-stamp]'), { scale: 3, rotate: -18, opacity: 0 }, {
-            scale: 1, rotate: -6, opacity: 1, duration: 0.5, delay: i * 0.12, ease: 'back.out(3)',
-            scrollTrigger: { trigger: el, start: 'top 88%' }, onComplete: () => bus.pulse(0.5),
-          });
-        });
-        if (document.querySelector('.sec--outcome')) gsap.fromTo('.outcome__word', { letterSpacing: '0.6em', scale: 0.7 }, { letterSpacing: '-0.04em', scale: 1, ease: 'none', scrollTrigger: { trigger: '.sec--outcome', start: 'top bottom', end: 'center center', scrub: 1 } });
-        if (document.querySelector('.end')) gsap.fromTo('.end__big', { scale: 0.85, opacity: 0.2 }, { scale: 1, opacity: 1, ease: 'none', scrollTrigger: { trigger: '.end', start: 'top bottom', end: 'center center', scrub: 1 } });
-        if (document.querySelector('.phead__title')) gsap.to('.phead__title', { yPercent: -40, opacity: 0.25, ease: 'none', scrollTrigger: { trigger: '.phead', start: 'top top', end: 'bottom top', scrub: 0.6 } });
-      }
-      const mm = gsap.matchMedia();
-      mm.add('(min-width: 900px) and (prefers-reduced-motion: no-preference)', () => {
-        const track = document.querySelector<HTMLElement>('.loop__track');
-        if (!track) return;
-        const dist = () => Math.max(0, track.scrollWidth - innerWidth + 120);
-        gsap.to(track, {
-          x: () => -dist(), ease: 'none',
-          scrollTrigger: { trigger: '.sec--loop', pin: true, start: 'top top', end: () => `+=${dist()}`, scrub: 0.8, invalidateOnRefresh: true, anticipatePin: 1 },
-        });
+      ScrollTrigger.batch('[data-reveal]', {
+        start: 'top 94%',
+        once: true,
+        onEnter: (els) => gsap.fromTo(els, { y: 14, opacity: 0 }, { y: 0, opacity: 1, duration: 0.45, stagger: 0.03, ease: 'power2.out', overwrite: true }),
       });
     });
-    const t = setTimeout(() => ScrollTrigger.refresh(), 300);
+    const t = setTimeout(() => ScrollTrigger.refresh(), 200);
     return () => { clearTimeout(t); ctx.revert(); };
   }, [ready, key]);
-}
-
-/** Full-screen warp between pages. */
-function Warp({ label, color }: { label: string; color: string }) {
-  return (
-    <div className="warp" style={{ ['--c' as string]: color }} aria-hidden="true">
-      <div className="warp__ring" /><div className="warp__ring warp__ring--2" />
-      <p className="warp__label" data-text={label}>{label}</p>
-    </div>
-  );
 }
 
 function NotFound() {
@@ -121,31 +79,14 @@ function Shell() {
   const stages = scene?.stages ?? d.stages;
   const home = loc.pathname === '/';
 
-  // A state change is an event: shockwave through the scene and a flash across the screen.
   const prev = useRef<SceneMode | null>(null);
-  const [flash, setFlash] = useState<{ k: number; c: string } | null>(null);
   useEffect(() => {
-    if (prev.current && prev.current !== mode && LOUD[mode]) {
-      bus.pulse(LOUD[mode]);
-      if (!bus.reducedMotion) setFlash({ k: Date.now(), c: MODE_COLOR[mode] });
-    }
+    if (prev.current && prev.current !== mode && PULSE[mode]) bus.pulse(PULSE[mode]);
     prev.current = mode;
   }, [mode]);
 
-  // Route change: jump to the top, warp, shockwave.
-  const [warp, setWarp] = useState<{ k: number; label: string } | null>(null);
-  const first = useRef(true);
-  useEffect(() => {
-    if (lenis) lenis.scrollTo(0, { immediate: true, force: true }); else scrollTo(0, 0);
-    if (first.current) { first.current = false; return; }
-    bus.pulse(1.6);
-    const p = PAGES.find((x) => x.to === loc.pathname);
-    const label = p?.label ?? (loc.pathname.startsWith('/incidents/') ? decodeURIComponent(loc.pathname.split('/')[2] ?? '') : 'Sentinel');
-    if (bus.reducedMotion) return;
-    setWarp({ k: Date.now(), label });
-    const t = setTimeout(() => setWarp(null), 1150);
-    return () => clearTimeout(t);
-  }, [loc.pathname]);
+  // Route change: start the new page at the top.
+  useEffect(() => { scrollTo(0, 0); }, [loc.pathname]);
 
   // Keys: ⌘K / Ctrl+K / "/" opens the palette; 1–6 jump between consoles.
   useEffect(() => {
@@ -161,8 +102,8 @@ function Shell() {
     return () => removeEventListener('keydown', onKey);
   }, [palette, nav]);
 
-  useSmoothScroll(booted);
-  useScrollAnimations(booted, `${loc.pathname}:${d.incident?.id ?? 'none'}:${Object.keys(snap.details).length}`);
+  useScrollProgress();
+  useReveals(booted, `${loc.pathname}:${d.incident?.id ?? 'none'}:${Object.keys(snap.details).length}`);
 
   const split = snap.status?.traffic_split;
   const ctx = useMemo(() => ({ d, now, setScene }), [d, now]);
@@ -173,7 +114,6 @@ function Shell() {
           <Scene mode={mode} stages={stages} candidatePct={split?.candidate_percent ?? 0} offsetX={wide ? (home ? 2.6 : 3.3) : 0} narrow={!wide} />
         </Suspense>
         <div className="grain" aria-hidden="true" />
-        {flash && <div key={flash.k} className="flash" style={{ ['--c' as string]: flash.c }} aria-hidden="true" onAnimationEnd={() => setFlash(null)} />}
         <DemoBanner />
         <TopBar mode={mode} onMenu={() => setPalette(true)} />
         <main className={`content${booted ? ' is-in' : ''}`}>
@@ -190,10 +130,7 @@ function Shell() {
             </Routes>
           </div>
         </main>
-        {warp && <Warp key={warp.k} label={warp.label} color={MODE_COLOR[mode]} />}
         <Palette open={palette} onClose={() => setPalette(false)} />
-        <ClickWaves />
-        <Cursor />
         {!booted && <Boot onDone={onBoot} />}
         <p className="sr-only" role="status" aria-live="polite">{d.headline}</p>
       </div>

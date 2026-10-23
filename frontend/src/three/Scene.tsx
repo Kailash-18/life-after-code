@@ -1,6 +1,6 @@
 import { PerformanceMonitor, Stars } from '@react-three/drei';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { Bloom, ChromaticAberration, EffectComposer, Noise, Vignette } from '@react-three/postprocessing';
+import { Bloom, ChromaticAberration, EffectComposer, Vignette } from '@react-three/postprocessing';
 import { BlendFunction } from 'postprocessing';
 import { Component, useMemo, useRef, useState, type ReactNode } from 'react';
 import * as THREE from 'three';
@@ -12,18 +12,18 @@ import { coreFragment, coreVertex } from './shaders';
 interface Params { color: string; color2: string; agitation: number; speed: number; chaos: number; fracture: number; aberration: number; scan: number }
 
 const P: Record<SceneMode, Params> = {
-  connecting: { color: MODE_COLOR.connecting, color2: '#1b1f5c', agitation: 0.12, speed: 0.15, chaos: 0.05, fracture: 0, aberration: 0.0006, scan: 0 },
-  offline: { color: MODE_COLOR.offline, color2: '#14161a', agitation: 0.04, speed: 0.04, chaos: 0, fracture: 0, aberration: 0.0004, scan: 0 },
-  healthy: { color: MODE_COLOR.healthy, color2: '#1440ff', agitation: 0.16, speed: 0.22, chaos: 0, fracture: 0, aberration: 0.0006, scan: 0 },
-  canary: { color: MODE_COLOR.canary, color2: '#ff5a1f', agitation: 0.3, speed: 0.34, chaos: 0.08, fracture: 0, aberration: 0.0009, scan: 0 },
-  degraded: { color: MODE_COLOR.degraded, color2: '#ff2e63', agitation: 0.55, speed: 0.6, chaos: 0.35, fracture: 0.2, aberration: 0.002, scan: 0 },
-  breach: { color: MODE_COLOR.breach, color2: '#ff0040', agitation: 1.0, speed: 1.25, chaos: 1, fracture: 1, aberration: 0.0065, scan: 0 },
-  contained: { color: MODE_COLOR.contained, color2: '#ff2e63', agitation: 0.42, speed: 0.4, chaos: 0.25, fracture: 0.42, aberration: 0.0016, scan: 0 },
-  investigating: { color: MODE_COLOR.investigating, color2: '#3a1cff', agitation: 0.34, speed: 0.45, chaos: 0.1, fracture: 0.22, aberration: 0.0012, scan: 1 },
-  verifying: { color: MODE_COLOR.verifying, color2: '#7b3cff', agitation: 0.24, speed: 0.6, chaos: 0.04, fracture: 0.08, aberration: 0.0009, scan: 0.4 },
-  redeploying: { color: MODE_COLOR.redeploying, color2: '#00a3ff', agitation: 0.2, speed: 0.5, chaos: 0.02, fracture: 0.02, aberration: 0.0008, scan: 0 },
-  recovered: { color: MODE_COLOR.recovered, color2: '#00ffd0', agitation: 0.1, speed: 0.3, chaos: 0, fracture: 0, aberration: 0.0007, scan: 0 },
-  failed: { color: MODE_COLOR.failed, color2: '#5a0018', agitation: 0.7, speed: 0.3, chaos: 0.6, fracture: 0.75, aberration: 0.004, scan: 0 },
+  connecting: { color: MODE_COLOR.connecting, color2: '#1b1f5c', agitation: 0.066, speed: 0.09, chaos: 0.0225, fracture: 0.0, aberration: 0.00015, scan: 0 },
+  offline: { color: MODE_COLOR.offline, color2: '#14161a', agitation: 0.022, speed: 0.024, chaos: 0.0, fracture: 0.0, aberration: 0.0001, scan: 0 },
+  healthy: { color: MODE_COLOR.healthy, color2: '#1440ff', agitation: 0.088, speed: 0.132, chaos: 0.0, fracture: 0.0, aberration: 0.00015, scan: 0 },
+  canary: { color: MODE_COLOR.canary, color2: '#ff5a1f', agitation: 0.165, speed: 0.204, chaos: 0.036, fracture: 0.0, aberration: 0.00022, scan: 0 },
+  degraded: { color: MODE_COLOR.degraded, color2: '#ff2e63', agitation: 0.3025, speed: 0.36, chaos: 0.1575, fracture: 0.1, aberration: 0.0005, scan: 0 },
+  breach: { color: MODE_COLOR.breach, color2: '#ff0040', agitation: 0.55, speed: 0.75, chaos: 0.45, fracture: 0.5, aberration: 0.0012, scan: 0 },
+  contained: { color: MODE_COLOR.contained, color2: '#ff2e63', agitation: 0.231, speed: 0.24, chaos: 0.1125, fracture: 0.21, aberration: 0.0004, scan: 0 },
+  investigating: { color: MODE_COLOR.investigating, color2: '#3a1cff', agitation: 0.187, speed: 0.27, chaos: 0.045, fracture: 0.11, aberration: 0.0003, scan: 1 },
+  verifying: { color: MODE_COLOR.verifying, color2: '#7b3cff', agitation: 0.132, speed: 0.36, chaos: 0.018, fracture: 0.04, aberration: 0.00022, scan: 0.4 },
+  redeploying: { color: MODE_COLOR.redeploying, color2: '#00a3ff', agitation: 0.11, speed: 0.3, chaos: 0.009, fracture: 0.01, aberration: 0.0002, scan: 0 },
+  recovered: { color: MODE_COLOR.recovered, color2: '#00ffd0', agitation: 0.055, speed: 0.18, chaos: 0.0, fracture: 0.0, aberration: 0.00017, scan: 0 },
+  failed: { color: MODE_COLOR.failed, color2: '#5a0018', agitation: 0.385, speed: 0.18, chaos: 0.27, fracture: 0.375, aberration: 0.001, scan: 0 },
 };
 
 const STAGE_COLOR: Record<StageState, string> = {
@@ -47,7 +47,7 @@ function useLive(mode: SceneMode) {
     l.aberration += (target.aberration - l.aberration) * k;
     l.scan += (target.scan - l.scan) * k;
     l.c.lerp(tc, k); l.c2.lerp(tc2, k);
-    bus.kick *= Math.exp(-dt * 2.4);
+    bus.kick *= Math.exp(-dt * 3.2);
   });
   return live;
 }
@@ -71,7 +71,7 @@ function Core({ live }: { live: Live }) {
     if (grp.current) {
       grp.current.rotation.y += dt * (0.12 + l.speed * 0.4);
       grp.current.rotation.x = Math.sin(s.clock.elapsedTime * 0.3) * 0.15;
-      const sc = 1 + bus.kick * 0.08 + Math.sin(s.clock.elapsedTime * (1.2 + l.agitation * 6)) * 0.015 * (1 + l.agitation * 3);
+      const sc = 1 + bus.kick * 0.03 + Math.sin(s.clock.elapsedTime * (1.2 + l.agitation * 6)) * 0.015 * (1 + l.agitation * 3);
       grp.current.scale.setScalar(sc);
     }
   });
@@ -311,18 +311,15 @@ function Shockwaves({ live }: { live: Live }) {
   );
 }
 
-/** Camera path through the page, plus pointer parallax and shake. */
+/** Gentle camera drift with the page, plus a little pointer parallax. */
 const PATH: { at: number; pos: [number, number, number]; look: [number, number, number] }[] = [
-  { at: 0.0, pos: [0, 0.2, 7.2], look: [0, 0, 0] },
-  { at: 0.14, pos: [-1.2, 1.4, 8.4], look: [0, 0, 0] },
-  { at: 0.34, pos: [0, 6.2, 8.6], look: [0, -0.2, 0] },
-  { at: 0.52, pos: [1.6, -0.8, 8.0], look: [0, 0, 0] },
-  { at: 0.72, pos: [-1.4, -2.4, 8.8], look: [0, 0.3, 0] },
-  { at: 1.0, pos: [0, 0.4, 12.5], look: [0, 0, 0] },
+  { at: 0.0, pos: [0, 0.2, 7.4], look: [0, 0, 0] },
+  { at: 0.5, pos: [-0.5, 0.8, 8.2], look: [0, 0, 0] },
+  { at: 1.0, pos: [0, 0.3, 9.4], look: [0, 0, 0] },
 ];
 const ease = (x: number) => x * x * (3 - 2 * x);
 
-function Rig({ live, offsetX, narrow }: { live: Live; offsetX: number; narrow: boolean }) {
+function Rig({ offsetX, narrow }: { live?: Live; offsetX: number; narrow: boolean }) {
   const { camera } = useThree();
   const look = useRef(new THREE.Vector3());
   const pos = useRef(new THREE.Vector3(0, 0.2, 9));
@@ -334,18 +331,13 @@ function Rig({ live, offsetX, narrow }: { live: Live; offsetX: number; narrow: b
     const f = ease(Math.min(1, Math.max(0, (p - a.at) / (b.at - a.at))));
     const tp = new THREE.Vector3(...a.pos).lerp(new THREE.Vector3(...b.pos), f);
     const tl = new THREE.Vector3(...a.look).lerp(new THREE.Vector3(...b.look), f);
-    if (narrow) { tp.multiplyScalar(1.5); tp.y -= 1.6; tl.y -= 1.6; }
-    tp.x += bus.pointer.x * 0.5 - offsetX;
-    tp.y += bus.pointer.y * 0.35;
-    const k = 1 - Math.exp(-dt * 3);
+    if (narrow) { tp.multiplyScalar(1.7); tp.y -= 2.4; tl.y -= 2.4; }
+    tp.x += bus.pointer.x * 0.12 - offsetX;
+    tp.y += bus.pointer.y * 0.08;
+    const k = 1 - Math.exp(-dt * 1.6);
     pos.current.lerp(tp, k);
     look.current.lerp(tl.add(new THREE.Vector3(-offsetX, 0, 0)), k);
-    const shake = bus.reducedMotion ? 0 : (live.current.agitation > 0.8 ? 0.035 : 0) + bus.kick * 0.03;
-    camera.position.set(
-      pos.current.x + (Math.random() - 0.5) * shake,
-      pos.current.y + (Math.random() - 0.5) * shake,
-      pos.current.z,
-    );
+    camera.position.copy(pos.current);
     camera.lookAt(look.current);
     void s;
   });
@@ -355,15 +347,14 @@ function Rig({ live, offsetX, narrow }: { live: Live; offsetX: number; narrow: b
 function Fx({ live, enabled }: { live: Live; enabled: boolean }) {
   const off = useMemo(() => new THREE.Vector2(0.0006, 0.0006), []);
   useFrame(() => {
-    const a = live.current.aberration + bus.kick * 0.004;
+    const a = live.current.aberration + bus.kick * 0.0008;
     off.set(a, a * 0.6);
   });
   if (!enabled) return null;
   return (
     <EffectComposer multisampling={0}>
-      <Bloom mipmapBlur intensity={1.25} luminanceThreshold={0.08} luminanceSmoothing={0.25} radius={0.75} />
+      <Bloom mipmapBlur intensity={0.85} luminanceThreshold={0.08} luminanceSmoothing={0.25} radius={0.75} />
       <ChromaticAberration offset={off} blendFunction={BlendFunction.NORMAL} radialModulation={false} modulationOffset={0} />
-      <Noise premultiply opacity={0.35} blendFunction={BlendFunction.SOFT_LIGHT} />
       <Vignette darkness={0.75} offset={0.25} />
     </EffectComposer>
   );

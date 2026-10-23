@@ -2,7 +2,6 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSentinel } from '../api/source';
-import { bus } from '../state/bus';
 import { statusWord } from './kit';
 
 export const PAGES = [
@@ -36,11 +35,11 @@ export function Palette({ open, onClose }: { open: boolean; onClose: () => void 
     return ql ? cmds.filter((c) => `${c.label} ${c.hint} ${c.group}`.toLowerCase().includes(ql)) : cmds;
   }, [cmds, q]);
 
-  useEffect(() => { if (open) { setQ(''); setSel(0); setTimeout(() => input.current?.focus(), 30); bus.pulse(0.8); } }, [open]);
+  useEffect(() => { if (open) { setQ(''); setSel(0); setTimeout(() => input.current?.focus(), 30); } }, [open]);
   useEffect(() => setSel(0), [q]);
 
   if (!open) return null;
-  const run = (c?: Cmd) => { if (!c) return; onClose(); c.run(); bus.pulse(1.2); };
+  const run = (c?: Cmd) => { if (!c) return; onClose(); c.run(); };
   const key = (e: KeyboardEvent) => {
     if (e.key === 'ArrowDown') { e.preventDefault(); setSel((s) => Math.min(list.length - 1, s + 1)); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); setSel((s) => Math.max(0, s - 1)); }

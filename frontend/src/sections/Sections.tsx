@@ -91,7 +91,7 @@ export function Pulse({ d, num = '01' }: { d: Derived; num?: string }) {
 }
 
 /* ================= LOOP ================= */
-export function Loop({ stages, progress, caption, num = '02', pinned = true, title = 'The recovery loop' }: { stages: StageView[]; progress: number; caption: ReactNode; num?: string; pinned?: boolean; title?: string }) {
+export function Loop({ stages, progress, caption, num = '02', pinned = false, title = 'The recovery loop' }: { stages: StageView[]; progress: number; caption: ReactNode; num?: string; pinned?: boolean; title?: string }) {
   return (
     <section id="loop" className={`sec sec--loop${pinned ? '' : ' sec--loop-grid'}`}>
       <div className="loop__pin">

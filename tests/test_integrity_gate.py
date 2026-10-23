@@ -134,3 +134,12 @@ diff --git a/app/core.py b/app/core.py
     assert proc.returncode == 1
     assert "RULE_05_PROTECTED_CONFIG_MODIFIED" in proc.stdout
     assert "RULE_09_EQ_OVERRIDDEN_TRUE" in proc.stdout
+
+
+def test_integrity_gate_covers_nested_test_directories():
+    """A repair that edits app/tests/... (not only the top-level tests/) must be blocked too."""
+    patch_path = FIXTURES_DIR / "11_weakens_nested_app_test.patch"
+    proc = subprocess.run([sys.executable, str(GATE_SCRIPT), "--diff-file", str(patch_path)], capture_output=True, text=True)
+    assert proc.returncode == 1, proc.stdout
+    assert "RULE_01_EXISTING_TESTS_MODIFIED" in proc.stdout
+    assert "RULE_04_ASSERT_WEAKENED" in proc.stdout

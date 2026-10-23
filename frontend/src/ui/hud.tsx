@@ -13,20 +13,24 @@ export function Boot({ onDone }: { onDone: () => void }) {
   const [lines, setLines] = useState<string[]>([]);
   const [out, setOut] = useState(false);
   useEffect(() => {
-    if (bus.reducedMotion) { onDone(); return; }
-    const script = ['SENTINEL // DEPLOYMENT SAFETY CORE', 'linking read API ............ ok', 'loading recovery loop (9 stages) ok', 'arming deterministic gates ... ok', 'AI channel: ADVISORY ONLY'];
+    // Shown once per browser session, and short.
+    let seen = false;
+    try { seen = sessionStorage.getItem('sentinel.booted') === '1'; sessionStorage.setItem('sentinel.booted', '1'); } catch { /* storage blocked */ }
+    if (bus.reducedMotion || seen) { onDone(); return; }
+    const script = ['SENTINEL // DEPLOYMENT SAFETY CORE', 'linking read API ............ ok', 'AI channel: ADVISORY ONLY'];
     const t0 = performance.now(); let raf = 0;
     const tick = (t: number) => {
-      const p = Math.min(1, (t - t0) / 1900);
+      const p = Math.min(1, (t - t0) / 700);
       setN(Math.round(p * 100));
       setLines(script.slice(0, Math.ceil(p * script.length)));
       if (p < 1) raf = requestAnimationFrame(tick);
-      else { setOut(true); bus.pulse(2); setTimeout(onDone, 750); }
+      else { setOut(true); setTimeout(onDone, 350); }
     };
     raf = requestAnimationFrame(tick);
-    const skip = () => { cancelAnimationFrame(raf); setOut(true); setTimeout(onDone, 500); };
+    const skip = () => { cancelAnimationFrame(raf); setOut(true); setTimeout(onDone, 200); };
     addEventListener('keydown', skip, { once: true });
-    return () => { cancelAnimationFrame(raf); removeEventListener('keydown', skip); };
+    addEventListener('pointerdown', skip, { once: true });
+    return () => { cancelAnimationFrame(raf); removeEventListener('keydown', skip); removeEventListener('pointerdown', skip); };
   }, [onDone]);
   return (
     <div className={`boot${out ? ' is-out' : ''}`} aria-hidden="true">

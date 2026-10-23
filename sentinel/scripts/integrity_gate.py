@@ -48,6 +48,12 @@ PROTECTED_EXACT_FILES = {
 }
 
 
+def is_test_path(path: str) -> bool:
+    """True for any file inside a tests/ or test/ directory, at any depth (e.g. app/tests/test_orders.py)."""
+    parts = path.strip().replace("\\", "/").split("/")[:-1]
+    return any(p in ("tests", "test") for p in parts)
+
+
 def run_command(cmd: List[str], cwd: Optional[Path] = None) -> subprocess.CompletedProcess:
     return subprocess.run(
         cmd,
@@ -89,7 +95,7 @@ class IntegrityGateChecker:
                 continue
 
             # Check tests/ directory
-            if file_clean.startswith("tests/") or file_clean.startswith("test/"):
+            if is_test_path(file_clean):
                 # New files under tests/regressions/ are permitted (new regression tests)
                 is_allowed_new_regression = (
                     status == "A" and file_clean.startswith("tests/regressions/")
@@ -213,7 +219,7 @@ class IntegrityGateChecker:
                                 )
 
             # Rule 8: Changes to expected value in test files
-            if target_clean.startswith("tests/") or target_clean.startswith("test/"):
+            if is_test_path(target_clean):
                 for rem in removed_lines:
                     if re.match(r"^\s*assert\s+", rem):
                         for add in added_lines:

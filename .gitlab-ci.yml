@@ -386,10 +386,13 @@ evidence:collect:
   script:
     - echo "==> Constructing redacted evidence bundle & computing authoritative SHA-256"
     - python sentinel/scripts/evidence_collector.py --service $TARGET_APP_SERVICE --dry-run
+    # Fixed name so the Duo investigation flow can fetch the bundle from this job's artifacts
+    - cp "$(ls -t artifacts/evidence-bundle-*.json | head -1)" artifacts/evidence-bundle.json
   artifacts:
     when: always
     paths:
       - artifacts/evidence-bundle-*.json
+      - artifacts/evidence-bundle.json
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
       when: on_failure
@@ -397,27 +400,53 @@ evidence:collect:
 # ==============================================================================
 # STAGE 9: VERIFICATION GATES ON REPAIR MRs (Tasks S5, S6, K9)
 # ==============================================================================
-gate:regression-proof:
+.repair-mr-gate:
   stage: gate-verify
   image: python:3.11-slim
+  variables:
+    GIT_DEPTH: "0"          # both the broken (MR base) and fix SHAs must be present
   before_script:
-    - pip install -r app/requirements.txt pytest jsonschema requests
-  script:
-    - echo "==> Running Regression Proof gate: must fail on broken SHA, pass on fix SHA"
-    - python sentinel/scripts/regression_proof.py --broken-sha $CI_MERGE_REQUEST_DIFF_BASE_SHA --fix-sha $CI_COMMIT_SHA
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends git > /dev/null
+    - git config --global --add safe.directory "$CI_PROJECT_DIR"
+    - pip install -q -r app/requirements.txt pytest jsonschema
+    - mkdir -p artifacts
+    # Repair branches are duo/fix/inc-<id>; the regression test is tests/regressions/test_inc_<id>.py
+    - export INCIDENT_ID="${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME#duo/fix/}"
+    - export REGRESSION_TEST="tests/regressions/test_$(echo "$INCIDENT_ID" | tr '-' '_').py"
   rules:
     - if: $CI_MERGE_REQUEST_IID && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^duo\/fix\//
 
-gate:integrity-gate:
-  stage: gate-verify
-  image: python:3.11-slim
-  before_script:
-    - pip install pytest jsonschema requests
+gate:regression-proof:
+  extends: .repair-mr-gate
   script:
-    - echo "==> Running Integrity Gate: enforces test sanctity without weakening"
-    - python sentinel/scripts/integrity_gate.py --target-branch $CI_MERGE_REQUEST_TARGET_BRANCH_NAME
-  rules:
-    - if: $CI_MERGE_REQUEST_IID && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^duo\/fix\//
+    - echo "==> Regression proof for $INCIDENT_ID: $REGRESSION_TEST must fail with an assertion on $CI_MERGE_REQUEST_DIFF_BASE_SHA and pass on $CI_COMMIT_SHA"
+    - status=0
+    - python sentinel/scripts/regression_proof.py --broken "$CI_MERGE_REQUEST_DIFF_BASE_SHA" --fix "$CI_COMMIT_SHA" --test "$REGRESSION_TEST" --output-json artifacts/regression-proof.json --output-junit artifacts/regression-proof.xml || status=$?
+    - python sentinel/scripts/report_gate_verdict.py --gate regression_proof --report artifacts/regression-proof.json --incident-id "$INCIDENT_ID"
+    - exit $status
+  artifacts:
+    when: always
+    paths:
+      - artifacts/regression-proof.json
+      - artifacts/regression-proof.xml
+    reports:
+      junit: artifacts/regression-proof.xml
+
+gate:integrity-gate:
+  extends: .repair-mr-gate
+  script:
+    - echo "==> Integrity Gate on the repair diff $CI_MERGE_REQUEST_DIFF_BASE_SHA...$CI_COMMIT_SHA"
+    - status=0
+    - python sentinel/scripts/integrity_gate.py --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA" --head "$CI_COMMIT_SHA" --output-json artifacts/integrity-gate.json --output-junit artifacts/integrity-gate.xml || status=$?
+    - python sentinel/scripts/report_gate_verdict.py --gate integrity --report artifacts/integrity-gate.json --incident-id "$INCIDENT_ID"
+    - exit $status
+  artifacts:
+    when: always
+    paths:
+      - artifacts/integrity-gate.json
+      - artifacts/integrity-gate.xml
+    reports:
+      junit: artifacts/integrity-gate.xml
 
 # ==============================================================================
 # STAGE 10: AUTONOMOUS MERGE (Task K10)

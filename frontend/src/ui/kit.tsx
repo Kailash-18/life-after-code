@@ -2,7 +2,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import type { TimelineEvent } from '../api/types';
-import { bus } from '../state/bus';
 import { FAILURE_COPY, isFailure, type StageState, type StageView } from '../state/derive';
 import { Scramble, Tilt } from './fx';
 
@@ -91,7 +90,7 @@ export function Sha({ value, label }: { value?: string; label?: string }) {
   const [done, setDone] = useState(false);
   if (!value) return <span className="sha sha--none">{label ? `${label}: ` : ''}not recorded</span>;
   const copy = async () => {
-    try { await navigator.clipboard.writeText(value); setDone(true); bus.pulse(0.6); setTimeout(() => setDone(false), 1400); } catch { /* clipboard blocked */ }
+    try { await navigator.clipboard.writeText(value); setDone(true); setTimeout(() => setDone(false), 1400); } catch { /* clipboard blocked */ }
   };
   return (
     <button className={`sha${done ? ' is-done' : ''}`} onClick={copy} data-cursor={done ? 'Copied' : 'Copy'} title="Copy">

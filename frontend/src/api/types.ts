@@ -195,16 +195,5 @@ export interface S3StorageStatus {
   health: string;
 }
 
-export interface S3RollbackResult {
-  status: string;
-  action: string;
-  snapshot_id: string;
-  restored_revision: string;
-  restored_incidents: number;
-  traffic_split: { stable_percent: number; candidate_percent: number };
-  sha256: string;
-  s3_integrity_verified: boolean;
-  storage?: S3StorageStatus;
-}
 
 

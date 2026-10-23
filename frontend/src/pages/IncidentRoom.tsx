@@ -41,6 +41,8 @@ export default function IncidentRoom() {
   const verified = events.find((e) => e.type === 'recovery.verified');
   const allFindings = att?.gate_results.flatMap((g) => g.findings.map((f) => ({ ...f, gate: g.gate }))) ?? [];
   const branch = `duo/fix/${id}`;
+  // The backend may leave detected_at empty; the recorded incident.detected event is the next-best source.
+  const detectedAt = base.detected_at || events.find((e) => e.type === 'incident.detected')?.at || '';
 
   return (
     <div className="page page--room" style={{ ['--room' as string]: MODE_COLOR[view.mode] }}>
@@ -49,11 +51,11 @@ export default function IncidentRoom() {
           <div className="room__status">
             <span className="card__k">Status, as the incident record says</span>
             <b className={`room__word tone-${statusTone(base.status)}`}>{statusWord(base.status)}</b>
-            <span className="muted small">{verified ? `recovered in ${dur(base.detected_at, verified.at)}` : `open for ${dur(base.detected_at, new Date(now).toISOString())}`}</span>
+            <span className="muted small">{verified ? `recovered in ${dur(detectedAt, verified.at)}` : `open for ${dur(detectedAt, new Date(now).toISOString())}`}</span>
           </div>
         }>
         <p>
-          Release <b>{rel?.version ?? base.release_id}</b>{rel?.commit_sha && <> (<code>{rel.commit_sha}</code>)</>} · detected {dateTime(base.detected_at)} ({ago(base.detected_at, now)})
+          Release <b>{rel?.version ?? base.release_id}</b>{rel?.commit_sha && <> (<code>{rel.commit_sha}</code>)</>} · detected {dateTime(detectedAt)} ({ago(detectedAt, now)})
           {live && <> · <Chip tone="bad" pulse>live</Chip></>}
         </p>
         <p className="room__back"><Link to="/incidents" data-cursor="Back">← all incidents</Link></p>
