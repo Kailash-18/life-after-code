@@ -31,3 +31,25 @@ def test_run_evacuation_audit_artifact(tmp_path: Path):
     assert report["status"] == "EVACUATED"
     out_file = tmp_path / "cloud-region-evacuation-report.json"
     assert out_file.exists()
+
+
+def test_cloud_region_reinstatement_happy_path():
+    evacuator = CloudRegionEvacuator()
+    report = evacuator.reinstate_region("us-central1", "us-east1")
+
+    assert report["status"] == "REINSTATED"
+    assert report["final_traffic_allocation"]["us-central1"] == 100
+    assert report["final_traffic_allocation"]["us-east1"] == 0
+    assert len(report["ramp_steps_executed"]) == 3
+    assert report["thundering_herd_guard"] == "ACTIVE"
+
+
+def test_probe_regional_health_evaluates_correctly():
+    evacuator = CloudRegionEvacuator()
+    healthy = evacuator.probe_regional_health("us-central1", simulated_latency_ms=45.0, simulated_error_rate=0.0)
+    assert healthy["healthy"] is True
+    assert healthy["recommendation"] == "STABLE"
+
+    degraded = evacuator.probe_regional_health("us-central1", simulated_latency_ms=220.0, simulated_error_rate=0.08)
+    assert degraded["healthy"] is False
+    assert degraded["recommendation"] == "EVACUATE_IMMEDIATELY"

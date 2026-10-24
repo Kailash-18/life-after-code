@@ -93,6 +93,7 @@ def run_kms_audit(output_dir: Path | None = None) -> dict[str, Any]:
         output_dir.mkdir(parents=True, exist_ok=True)
         out_file = output_dir / "kms-rotation-audit-report.json"
         out_file.write_text(json.dumps(report, indent=2), encoding="utf-8")
+        (output_dir / "kms-rotation-report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
 
     return report
 
@@ -100,6 +101,7 @@ def run_kms_audit(output_dir: Path | None = None) -> dict[str, Any]:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Sentinel Cloud KMS Rotation Auditor")
     parser.add_argument("--output-dir", default="artifacts", help="Report output dir")
+    parser.add_argument("--dry-run", action="store_true", help="Simulate KMS key lifecycle audit in safe mode")
     args = parser.parse_args()
 
     report = run_kms_audit(output_dir=Path(args.output_dir))

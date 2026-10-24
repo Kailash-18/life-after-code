@@ -30,5 +30,7 @@ def test_run_governance_audit_artifact(tmp_path: Path):
     assert report["verdict"] == "COMPLIANT"
     out_file = tmp_path / "governance-compliance-report.json"
     assert out_file.exists()
+    alias_file = tmp_path / "cis-governance-report.json"
+    assert alias_file.exists()
     data = json.loads(out_file.read_text(encoding="utf-8"))
     assert data["specification"] == "CIS Multi-Cloud Benchmark v2.0"

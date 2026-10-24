@@ -120,6 +120,20 @@ def test_evaluate_cloud_finops_guard_writes_artifact(tmp_path: Path):
     assert report["verdict"] == "PASS"
     out_file = tmp_path / "finops-cloud-cost-report.json"
     assert out_file.exists()
+    forecast_file = tmp_path / "finops-spend-forecast.json"
+    assert forecast_file.exists()
     data = json.loads(out_file.read_text(encoding="utf-8"))
     assert data["verdict"] == "PASS"
     assert "cloud_cost_breakdown" in data
+    assert "carbon_window_forecast" in data
+
+
+def test_forecast_carbon_optimal_deployment_window():
+    guard = CloudFinOpsGuard()
+    forecast = guard.forecast_carbon_optimal_deployment_window("us-central1")
+
+    assert forecast["region"] == "us-central1"
+    assert len(forecast["diurnal_24h_forecast"]) == 24
+    assert 0 <= forecast["optimal_window_hour_utc"] <= 23
+    assert forecast["optimal_window_cfe_pct"] >= 70.0
+    assert "recommendation" in forecast

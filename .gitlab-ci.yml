@@ -63,7 +63,9 @@ plan:finops-greenops:
     when: always
     paths:
       - artifacts/finops-spend-forecast.json
+      - artifacts/finops-cloud-cost-report.json
       - artifacts/sci-carbon-intensity.json
+      - artifacts/sci-carbon-intensity-report.json
 
 # ==============================================================================
 # STAGE 1: LINT & CONTRACT INTEGRITY
@@ -241,6 +243,7 @@ security:cyclonedx-vex:
     when: always
     paths:
       - artifacts/cyclonedx-vex-report.json
+      - artifacts/cyclonedx-vex-attestation.json
 
 security:kms-envelope-audit:
   stage: security
@@ -252,6 +255,7 @@ security:kms-envelope-audit:
     when: always
     paths:
       - artifacts/kms-rotation-report.json
+      - artifacts/kms-rotation-audit-report.json
 
 security:cloud-armor-waf:
   stage: security
@@ -263,6 +267,7 @@ security:cloud-armor-waf:
     when: always
     paths:
       - artifacts/cloud-armor-waf-report.json
+      - artifacts/cloud-armor-threat-mitigation-report.json
 
 govern:cis-zero-trust:
   stage: security
@@ -274,6 +279,7 @@ govern:cis-zero-trust:
     when: always
     paths:
       - artifacts/cis-governance-report.json
+      - artifacts/governance-compliance-report.json
 
 
 

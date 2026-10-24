@@ -138,6 +138,7 @@ def run_sci_evaluation(
         output_dir.mkdir(parents=True, exist_ok=True)
         out_file = output_dir / "sci-carbon-intensity-report.json"
         out_file.write_text(json.dumps(report, indent=2), encoding="utf-8")
+        (output_dir / "sci-carbon-intensity.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
 
     if emit_to_backend and backend_url:
         try:
@@ -165,6 +166,7 @@ def main() -> None:
     parser.add_argument("--requests", type=int, default=1_000_000, help="Transaction volume")
     parser.add_argument("--latency-ms", type=float, default=65.0, help="Average service latency (ms)")
     parser.add_argument("--output-dir", default="artifacts", help="Report output directory")
+    parser.add_argument("--dry-run", action="store_true", help="Simulate SCI evaluation in safe mode")
     parser.add_argument("--no-emit", action="store_true", help="Skip backend event emission")
     args = parser.parse_args()
 
@@ -174,6 +176,7 @@ def main() -> None:
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "sci-carbon-intensity-report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+    (out_dir / "sci-carbon-intensity.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
 
     print(f"\n{'='*70}")
     print("  PROJECT SENTINEL — ISO/IEC 21031 SOFTWARE CARBON INTENSITY (SCI)")

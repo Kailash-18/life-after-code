@@ -104,6 +104,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Sentinel Multi-Cloud Cost Anomaly Detector")
     parser.add_argument("--current-spend", type=float, default=18.50, help="Observed daily spend")
     parser.add_argument("--output-dir", default="artifacts", help="Report output dir")
+    parser.add_argument("--dry-run", action="store_true", help="Simulate anomaly detection in safe mode")
     args = parser.parse_args()
 
     report = run_cost_anomaly_audit(current_spend=args.current_spend, output_dir=Path(args.output_dir))

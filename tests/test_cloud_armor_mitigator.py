@@ -37,5 +37,10 @@ def test_cloud_armor_mitigator_identifies_sqli():
 def test_run_armor_audit_artifact(tmp_path: Path):
     report = run_armor_audit(output_dir=tmp_path)
     assert report["waf_active"] is True
+    assert "gcp_security_policy" in report
+    assert report["gcp_security_policy"]["type"] == "CLOUD_ARMOR"
+
     out_file = tmp_path / "cloud-armor-threat-mitigation-report.json"
     assert out_file.exists()
+    waf_file = tmp_path / "cloud-armor-waf-report.json"
+    assert waf_file.exists()

@@ -40,5 +40,9 @@ def test_ks_comparator_detects_distribution_drift():
 def test_run_ks_comparator_audit_artifact(tmp_path: Path):
     report = run_ks_comparator_audit(output_dir=tmp_path)
     assert report["verdict"] == "PASS"
+    assert "wasserstein_distance" in report
+    assert "candidate_p99_ms" in report
     out_file = tmp_path / "ks-latency-distribution-report.json"
     assert out_file.exists()
+    alias_file = tmp_path / "ks-latency-report.json"
+    assert alias_file.exists()

@@ -78,6 +78,7 @@ def run_vex_audit(output_dir: Path | None = None) -> dict[str, Any]:
         output_dir.mkdir(parents=True, exist_ok=True)
         out_file = output_dir / "cyclonedx-vex-attestation.json"
         out_file.write_text(json.dumps(report, indent=2), encoding="utf-8")
+        (output_dir / "cyclonedx-vex-report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
 
     return report
 
@@ -85,6 +86,7 @@ def run_vex_audit(output_dir: Path | None = None) -> dict[str, Any]:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Sentinel CycloneDX VEX Attestor")
     parser.add_argument("--output-dir", default="artifacts", help="Report output dir")
+    parser.add_argument("--dry-run", action="store_true", help="Simulate VEX attestation in safe mode")
     args = parser.parse_args()
 
     report = run_vex_audit(output_dir=Path(args.output_dir))
