@@ -10,5 +10,4 @@ async def healthz():
         "status": "ok",
         "service": settings.service_name,
         "version": settings.version,
-        "fault_injection_active": settings.fault_injection_mode,
     }

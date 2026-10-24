@@ -278,6 +278,9 @@ def simulate_full_recovery_loop(
     with open(art_dir / "regression-proof-report.json", "w", encoding="utf-8") as f:
         json.dump({"verdict": "PASS", "tested_sha": fix_sha}, f)
 
+    # SIMULATED proof: the backend requires both runs (fails on broken with an
+    # AssertionError, passes on fix) before it accepts a PASS. Shape matches
+    # regression_proof.py output as reported by report_gate_verdict.py.
     emit_event(
         event_type="regression_proof.verdict",
         source="sentinel-gate:regression-proof",
@@ -287,8 +290,11 @@ def simulate_full_recovery_loop(
         incident_id=inc_id,
         data={
             "verdict": "PASS",
-            "kind": "regression_on_fix",
+            "kind": "regression_proof",
+            "broken_sha": broken_sha,
             "fix_sha": fix_sha,
+            "broken_run": {"exit_code": 1, "outcome": "failed", "failure_type": "AssertionError"},
+            "fix_run": {"exit_code": 0, "outcome": "passed", "failure_type": None},
         },
     )
     time.sleep(delay_between_steps)

@@ -119,7 +119,7 @@ def test_events_valid_signature_and_timestamp_accepted(client, hmac_secret):
         "type": "incident.detected",
         "source": "sentinel/scripts/evaluator.py",
         "pipeline_id": "1002",
-        "job_id": "2003d",
+        "job_id": "2003",
         "commit_sha": "c9aaa1f",
         "incident_id": "inc-test-auth-01",
         "sent_at": now_iso,

@@ -142,6 +142,13 @@ def evaluate_target(
         work_items.extend([ep] * count)
     work_items = work_items[:sample_count]
 
+    # Warm-up, not measured: the first requests of a run pay client set-up and (on Cloud Run)
+    # cold-start costs. The candidate is probed first, so without this its p95 is inflated
+    # and the latency-ratio check fails even a healthy release (seen in integration testing).
+    warm_up = [{"path": "/healthz", "method": "GET", "expected_status": 200}] * max(concurrency, 1) * 2
+    with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as executor:
+        list(executor.map(lambda ep: execute_probe(base_url, ep, timeout), warm_up))
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as executor:
         future_map = {
             executor.submit(execute_probe, base_url, ep, timeout): ep
@@ -256,7 +263,11 @@ def run_evaluation(
         max_lat_ratio = thresholds.get("max_latency_ratio", 1.30)
         stable_p95 = max(1.0, stable_stats["p95_ms"])
         lat_ratio = candidate_stats["p95_ms"] / stable_p95
-        if lat_ratio > max_lat_ratio:
+        # A ratio of two millisecond-scale numbers is noise (7 ms vs 9 ms is "1.3x").
+        # Only treat it as a regression when the absolute slowdown is meaningful too.
+        min_delta_ms = thresholds.get("latency_ratio_min_delta_ms", 50.0)
+        lat_delta_ms = candidate_stats["p95_ms"] - stable_stats["p95_ms"]
+        if lat_ratio > max_lat_ratio and lat_delta_ms > min_delta_ms:
             breached_thresholds.append(
                 f"Candidate latency ratio ({lat_ratio:.2f}x) exceeds stable ratio limit ({max_lat_ratio:.2f}x)"
             )
@@ -277,7 +288,12 @@ def run_evaluation(
             f"SRE Error Budget Burn Rate ({composite_health['error_budget']['burn_rate']:.1f}x) exceeds critical threshold ({burn_rate_max:.1f}x) — budget exhausted in {composite_health['error_budget']['hours_to_exhaustion']}h"
         )
 
-    if composite_health["hypothesis_testing"]["is_significant"]:
+    # Statistical significance alone fires on ~5% of identical runs (alpha = 0.05) and on
+    # millisecond differences; require a meaningful p95 slowdown as well.
+    p95_slowdown_ms = candidate_stats["p95_ms"] - (stable_stats["p95_ms"] if stable_stats else candidate_stats["p95_ms"])
+    if composite_health["hypothesis_testing"]["is_significant"] and p95_slowdown_ms > thresholds.get(
+        "latency_ratio_min_delta_ms", 50.0
+    ):
         breached_thresholds.append(
             f"Statistically significant latency regression confirmed by Mann-Whitney U test (p={composite_health['hypothesis_testing']['p_value']:.4f} < {thresholds.get('mann_whitney_u_significance', 0.05)})"
         )

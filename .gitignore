@@ -58,6 +58,12 @@ dist/
 *.DS_Store
 Thumbs.db
 
+# Databases & local state
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
 # Project Sentinel CI & Gate Artifacts
 artifacts/
 *.tfstate*

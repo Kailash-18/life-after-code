@@ -126,6 +126,7 @@ thresholds:
   # Comparison against stable baseline
   max_error_rate_delta: 0.01        # Candidate error rate cannot exceed stable by more than 1.0 percentage points
   max_latency_ratio: 1.30           # Candidate p95 latency cannot exceed stable p95 by more than 30%
+  latency_ratio_min_delta_ms: 50.0  # ...and only when the p95 slowdown is also > 50 ms (avoids ms-scale noise)
 
   # SRE Error Budget & Statistical Hypothesis Testing (Principal SRE Tier)
   slo_target: 0.999                 # 99.9% availability SLO (0.1% allowable failure budget)
@@ -146,17 +147,54 @@ probe:
       method: "GET"
       weight: 3
       expected_status: 200
+    # POST payloads must match the demo app's OrderCreate schema (app/app/routes/orders.py):
+    # customer_id, customer_tier, items[{item_id, quantity, unit_price}].
+    # Real clients send tier names in any casing, so the probe does too; without the
+    # mixed-case requests the seeded fault (docs/demo/fault-discount-lookup.patch) is invisible.
     - path: "/api/v1/orders"
       method: "POST"
-      weight: 5
+      weight: 2
       expected_status: 201
       payload:
         customer_id: "cust-synthetic-probe"
+        customer_tier: "standard"
         items:
-          - sku: "SKU-SENTINEL-TEST"
+          - item_id: "sku-sentinel-probe"
             quantity: 2
             unit_price: 49.99
-        tier: "gold"
+    - path: "/api/v1/orders"
+      method: "POST"
+      weight: 1
+      expected_status: 201
+      payload:
+        customer_id: "cust-synthetic-probe"
+        customer_tier: "premium"
+        items:
+          - item_id: "sku-sentinel-probe"
+            quantity: 2
+            unit_price: 49.99
+    - path: "/api/v1/orders"
+      method: "POST"
+      weight: 1
+      expected_status: 201
+      payload:
+        customer_id: "cust-synthetic-probe"
+        customer_tier: "Premium"
+        items:
+          - item_id: "sku-sentinel-probe"
+            quantity: 2
+            unit_price: 49.99
+    - path: "/api/v1/orders"
+      method: "POST"
+      weight: 1
+      expected_status: 201
+      payload:
+        customer_id: "cust-synthetic-probe"
+        customer_tier: "ENTERPRISE"
+        items:
+          - item_id: "sku-sentinel-probe"
+            quantity: 2
+            unit_price: 49.99
 
 # Rollback policies
 rollback:

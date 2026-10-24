@@ -8,11 +8,12 @@ import logging
 import os
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
+from app.routes.events import require_ci_signature
 from app.s3_state_store import s3_state_store
-from app.state_engine import INCIDENTS_STORE
+from app.state_engine import incidents_snapshot, restore_incidents
 
 logger = logging.getLogger(__name__)
 
@@ -33,14 +34,26 @@ class StateRollbackRequest(BaseModel):
     dry_run: bool = Field(default=False, description="Simulate rollback without cloud mutation")
 
 
-@router.post("/snapshot", status_code=status.HTTP_201_CREATED)
+def _restore(snapshot_id: str) -> dict[str, Any]:
+    """Verify the snapshot's SHA-256, then write its incidents into the repository."""
+    loaded: dict[str, Any] = {}
+    res = s3_state_store.restore_snapshot(snapshot_id, loaded)
+    if res.get("success"):
+        try:
+            res["restored_incidents_count"] = restore_incidents(loaded)
+        except ValueError as exc:  # pydantic ValidationError is a ValueError
+            return {"success": False, "error": f"Snapshot content is not valid incident data: {str(exc)[:200]}"}
+    return res
+
+
+@router.post("/snapshot", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_ci_signature)])
 async def create_state_snapshot(req: StateSnapshotRequest | None = None) -> dict[str, Any]:
     """
     Triggers an immediate cryptographic state snapshot.
     Persists incident history and recovery attempts to AWS S3 with KMS encryption.
     """
     meta = req.metadata if req else {}
-    summary = s3_state_store.snapshot_state(INCIDENTS_STORE, extra_metadata=meta)
+    summary = s3_state_store.snapshot_state(incidents_snapshot(), extra_metadata=meta)
     return {
         "status": "CREATED",
         "snapshot": summary,
@@ -59,13 +72,13 @@ async def list_state_snapshots(limit: int = 20) -> dict[str, Any]:
     }
 
 
-@router.post("/restore")
+@router.post("/restore", dependencies=[Depends(require_ci_signature)])
 async def restore_state_snapshot(req: StateRestoreRequest) -> dict[str, Any]:
     """
     Atomically restores Sentinel incident state from an authoritative S3 snapshot
     after verifying the SHA-256 integrity hash.
     """
-    res = s3_state_store.restore_snapshot(req.snapshot_id, INCIDENTS_STORE)
+    res = _restore(req.snapshot_id)
     if not res.get("success"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -80,7 +93,7 @@ async def restore_state_snapshot(req: StateRestoreRequest) -> dict[str, Any]:
     return res
 
 
-@router.post("/rollback")
+@router.post("/rollback", dependencies=[Depends(require_ci_signature)])
 async def rollback_state_snapshot(req: StateRollbackRequest | None = None) -> dict[str, Any]:
     """
     Executes an authoritative rollback using a cryptographically verified S3 state snapshot.
@@ -103,7 +116,7 @@ async def rollback_state_snapshot(req: StateRollbackRequest | None = None) -> di
             )
         snapshot_id = snapshots[0]["snapshot_id"]
 
-    res = s3_state_store.restore_snapshot(snapshot_id, INCIDENTS_STORE)
+    res = _restore(snapshot_id)
     if not res.get("success"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -116,7 +129,8 @@ async def rollback_state_snapshot(req: StateRollbackRequest | None = None) -> di
             },
         )
 
-    restored_rev = f"{request_data.service_name}-known-good-rev001"
+    # Report only what actually happened: no assumed revision, traffic split or success.
+    traffic_shift: dict[str, Any] = {"attempted": True, "ok": False}
     try:
         from sentinel.scripts.rollback import execute_rollback
 
@@ -127,19 +141,29 @@ async def rollback_state_snapshot(req: StateRollbackRequest | None = None) -> di
             dry_run=request_data.dry_run,
             emit_to_backend=False,
         )
-        restored_rev = rb_res.get("restored_revision", restored_rev)
-    except Exception as e:
+        shift = rb_res.get("traffic_res") or {}
+        # Only a real gcloud traffic update plus a passing probe counts; "simulation" and
+        # "fallback_local" modes did not move any traffic.
+        traffic_shift = {
+            "attempted": True,
+            "ok": bool(shift.get("success")) and shift.get("mode") == "gcloud" and rb_res.get("post_rollback_probe_ok") is True,
+            "mode": shift.get("mode"),
+            "restored_revision": rb_res.get("restored_revision"),
+            "post_rollback_probe_ok": rb_res.get("post_rollback_probe_ok"),
+        }
+    except Exception as e:  # noqa: BLE001 - surface the failure instead of hiding it
         logger.warning("Rollback traffic shift attempt encountered error: %s", e)
+        traffic_shift = {"attempted": True, "ok": False, "error": f"{type(e).__name__}: {e}"[:300]}
 
     return {
-        "status": "SUCCESS",
+        "status": "SUCCESS" if traffic_shift["ok"] else "STATE_RESTORED_TRAFFIC_NOT_SHIFTED",
         "action": "ROLLBACK_TO_S3_SNAPSHOT",
         "snapshot_id": snapshot_id,
-        "restored_revision": restored_rev,
-        "restored_incidents": res.get("restored_count", 0),
-        "traffic_split": {"stable_percent": 100, "candidate_percent": 0},
+        "dry_run": request_data.dry_run,
+        "restored_incidents": res.get("restored_incidents_count", 0),
         "sha256": res.get("sha256"),
-        "s3_integrity_verified": True,
+        "snapshot_integrity_verified": True,
+        "traffic_shift": traffic_shift,
         "storage": s3_state_store.get_storage_status(),
     }
 

@@ -56,9 +56,17 @@ class S3StateStore:
         self._last_sync_time: str | None = None
         self._snapshots_history: list[dict[str, Any]] = []
 
-        # Local fallback cache directory for offline resilience
-        self.local_cache_dir = Path("artifacts/state_cache")
-        self.local_cache_dir.mkdir(parents=True, exist_ok=True)
+        # Local fallback cache directory for offline resilience. Must be writable by the
+        # (non-root) service user; an unwritable path disables the cache instead of
+        # crashing the backend at import time.
+        self.local_cache_dir = Path(os.getenv("SENTINEL_STATE_CACHE_DIR") or "artifacts/state_cache")
+        self.max_cached_snapshots = int(os.getenv("SENTINEL_STATE_CACHE_MAX", "50"))
+        self.local_cache_enabled = True
+        try:
+            self.local_cache_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            logger.warning("State cache disabled: cannot create %s (%s)", self.local_cache_dir, exc)
+            self.local_cache_enabled = False
 
         self._initialize_s3()
 
@@ -161,11 +169,18 @@ class S3StateStore:
             except Exception as e:
                 logger.warning("Failed to write state snapshot to S3: %s", e)
 
-        # 2. Persist to Local Secure Fallback Cache
+        # 2. Persist to Local Secure Fallback Cache (bounded: Cloud Run's filesystem is memory)
         cache_file = self.local_cache_dir / f"{snapshot_id}.json"
-        cache_file.write_text(serialized, encoding="utf-8")
-        latest_cache = self.local_cache_dir / "latest_state.json"
-        latest_cache.write_text(serialized, encoding="utf-8")
+        local_written = False
+        if self.local_cache_enabled:
+            try:
+                cache_file.write_text(serialized, encoding="utf-8")
+                (self.local_cache_dir / "latest_state.json").write_text(serialized, encoding="utf-8")
+                local_written = True
+                for old_file in sorted(self.local_cache_dir.glob("snap-*.json"), reverse=True)[self.max_cached_snapshots:]:
+                    old_file.unlink(missing_ok=True)
+            except OSError as exc:
+                logger.warning("Could not write local state snapshot: %s", exc)
 
         summary = {
             "snapshot_id": snapshot_id,
@@ -174,10 +189,11 @@ class S3StateStore:
             "active_incidents": len(incident_store),
             "s3_persisted": s3_written,
             "s3_uri": f"s3://{self.bucket_name}/{s3_key}" if s3_written else None,
-            "local_cache_path": str(cache_file),
-            "status": "PASS",
+            "local_cache_path": str(cache_file) if local_written else None,
+            "status": "PASS" if (s3_written or local_written) else "NOT_PERSISTED",
         }
         self._snapshots_history.insert(0, summary)
+        del self._snapshots_history[self.max_cached_snapshots:]
         return summary
 
     def list_snapshots(self, limit: int = 20) -> list[dict[str, Any]]:
@@ -211,7 +227,8 @@ class S3StateStore:
         if self._snapshots_history:
             return self._snapshots_history[:limit]
 
-        for f in sorted(self.local_cache_dir.glob("snap-*.json"), reverse=True)[:limit]:
+        local_files = sorted(self.local_cache_dir.glob("snap-*.json"), reverse=True) if self.local_cache_enabled else []
+        for f in local_files[:limit]:
             try:
                 data = json.loads(f.read_text(encoding="utf-8"))
                 results.append({
@@ -317,26 +334,31 @@ class S3StateStore:
         return False
 
     def get_storage_status(self) -> dict[str, Any]:
-        """Returns comprehensive storage health, KMS encryption, and locking metrics."""
+        """Storage status as it actually is: nothing here is claimed unless it was observed."""
+        if self._s3_available:
+            storage_type = "AWS_S3_REMOTE_STATE"
+        elif self.local_cache_enabled:
+            storage_type = "LOCAL_CACHE_ONLY"
+        else:
+            storage_type = "NONE"
         return {
-            "storage_type": "AWS_S3_REMOTE_STATE",
-            "bucket_name": self.bucket_name,
-            "region": self.region,
+            "storage_type": storage_type,
+            "bucket_name": self.bucket_name if self._s3_available else None,
+            "region": self.region if self._s3_available else None,
             "prefix": self.prefix,
             "s3_connected": self._s3_available,
+            "local_cache_dir": str(self.local_cache_dir) if self.local_cache_enabled else None,
             "encryption": {
-                "algorithm": "aws:kms" if self.kms_key_id else "AES256",
-                "kms_key_id": self.kms_key_id,
-                "bucket_key_enabled": True,
+                "algorithm": ("aws:kms" if self.kms_key_id else "AES256") if self._s3_available else None,
+                "kms_key_id": self.kms_key_id if self._s3_available else None,
             },
-            "distributed_locking": {
-                "table_name": os.getenv("SENTINEL_DYNAMODB_LOCK_TABLE", "sentinel-terraform-state-locks"),
-                "status": "ACTIVE",
-            },
-            "versioning_enabled": True,
+            # Not checked by this service, so not claimed.
+            "distributed_locking": {"status": "NOT_VERIFIED"},
+            "versioning_enabled": None,
             "last_sync_timestamp": self._last_sync_time,
             "total_snapshots_recorded": len(self.list_snapshots(limit=100)),
-            "health": "HEALTHY" if (self._s3_available or self.local_cache_dir.exists()) else "DEGRADED",
+            "durable_across_restarts": self._s3_available,
+            "health": "HEALTHY" if self._s3_available else ("DEGRADED" if self.local_cache_enabled else "UNAVAILABLE"),
         }
 
 

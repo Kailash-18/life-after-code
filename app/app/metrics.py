@@ -1,8 +1,12 @@
+import logging
 import time
 
 from typing import Optional
 from fastapi import Request, Response
+from fastapi.responses import JSONResponse
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
+
+logger = logging.getLogger("target_app")
 
 REQUEST_COUNT = Counter(
     "http_requests_total",
@@ -37,10 +41,10 @@ async def metrics_middleware(request: Request, call_next):
         response: Response = await call_next(request)
         status_code = response.status_code
         return response
-    except Exception:
+    except Exception:  # error boundary: any unhandled bug becomes a 500 response
         status_code = 500
-        ERROR_COUNT.labels(endpoint=endpoint, status_code="500").inc()
-        raise
+        logger.exception("Unhandled error on %s %s", request.method, endpoint)
+        return JSONResponse(status_code=500, content={"detail": "Internal server error"})
     finally:
         duration = time.time() - start_time
         REQUEST_COUNT.labels(
