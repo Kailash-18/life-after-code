@@ -59,7 +59,7 @@
     },
     "release_id": {
       "type": "string",
-      "description": "Sentinel release identifier if already registered.",
+      "description": "Optional label. The backend identifies a release by commit_sha (rel-<sha[:12]>) and ignores this field when commit_sha is present.",
       "pattern": "^rel-[a-zA-Z0-9_-]+$"
     },
     "incident_id": {
