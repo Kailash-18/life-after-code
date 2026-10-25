@@ -72,10 +72,28 @@ def test_run_rollback_writes_artifact(tmp_path: Path, monkeypatch):
             dry_run=True,
             emit_to_backend=False,
         )
-        assert report["status"] == "ROLLED_BACK"
+        # A dry run is labelled as such and never claims a healthy probe.
+        assert report["status"] == "SIMULATED"
+        assert report["post_rollback_probe_ok"] is False
         assert report["restored_revision"] == "target-app-known-good-01"
 
         art_file = tmp_path / "artifacts" / "rollback-report.json"
         assert art_file.exists()
         saved = json.loads(art_file.read_text(encoding="utf-8"))
-        assert saved["status"] == "ROLLED_BACK"
+        assert saved["status"] == "SIMULATED"
+
+
+def test_real_rollback_needs_traffic_shift_and_probe(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("SENTINEL_SIMULATION_MODE", raising=False)
+    mock_resp = MagicMock()
+    mock_resp.status = 200
+    mock_resp.__enter__.return_value = mock_resp
+    mock_resp.__exit__.return_value = None
+    with patch("urllib.request.urlopen", return_value=mock_resp), patch("time.sleep"):
+        with patch("subprocess.check_output", return_value="{}"):
+            ok = run_rollback(service_name="svc", stable_url="http://x", known_good_rev="rev-1", emit_to_backend=False)
+        assert ok["status"] == "ROLLED_BACK" and ok["post_rollback_probe_ok"] is True
+        with patch("subprocess.check_output", side_effect=FileNotFoundError("gcloud")):
+            bad = run_rollback(service_name="svc", stable_url="http://x", known_good_rev="rev-1", emit_to_backend=False)
+        assert bad["status"] == "ROLLBACK_FAILED" and bad["post_rollback_probe_ok"] is False

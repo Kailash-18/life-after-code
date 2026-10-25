@@ -723,3 +723,9 @@ button.stat:hover { border-color: var(--line-2); }
   .hero { position: relative; }
   .hero::before { content: ''; position: absolute; inset: 38vh 0 0; z-index: -1; pointer-events: none; background: linear-gradient(180deg, transparent, rgba(3, 4, 6, 0.82) 22%, rgba(3, 4, 6, 0.9)); }
 }
+
+/* Events the backend recorded but refused */
+.ledger li.is-refused::before { border-color: var(--amber); border-style: dashed; background: var(--bg); }
+.ledger li.is-refused > div { opacity: 0.75; }
+.tag-refused { font: 700 9px/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--amber); border: 1px dashed var(--amber); padding: 4px 7px; border-radius: 999px; }
+.ledger__refused { color: var(--amber); font-size: 14px; }

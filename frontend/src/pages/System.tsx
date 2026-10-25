@@ -64,8 +64,10 @@ function StateStorage() {
       ) : (
         <>
           <b className={`syslink__word ${v.s3_connected ? 'tone-ok' : 'tone-warn'}`}>{v.s3_connected ? 'S3 CONNECTED' : 'LOCAL ONLY'}</b>
-          <p className="muted small">{v.s3_connected ? 'The backend reached its S3 bucket.' : 'The backend has no S3 connection; snapshots stay on its local disk.'} {v.total_snapshots_recorded} snapshot{v.total_snapshots_recorded === 1 ? '' : 's'} recorded{v.last_sync_timestamp ? `, last ${ago(v.last_sync_timestamp, now)}` : ''}.</p>
-          <p className="muted small">Configured target <code>{v.bucket_name}</code> ({v.region}), encryption <code>{v.encryption.algorithm}</code> — as configured, not verified by this console.</p>
+          <p className="muted small">{v.s3_connected ? 'The backend reached its S3 bucket.' : 'The backend has no S3 connection; snapshots stay on its local disk.'} {v.total_snapshots_recorded ?? 0} snapshot{v.total_snapshots_recorded === 1 ? '' : 's'} recorded{v.last_sync_timestamp ? `, last ${ago(v.last_sync_timestamp, now)}` : ''}.</p>
+          <p className="muted small">{v.bucket_name
+            ? <>Configured bucket <code>{v.bucket_name}</code>{v.region && <> ({v.region})</>}{v.encryption?.algorithm && <>, encryption <code>{v.encryption.algorithm}</code></>} — as the backend reports it.</>
+            : 'No S3 bucket is configured.'}</p>
         </>
       )}
       <p className="muted small">Read-only. Rollbacks and traffic changes happen only through CI jobs.</p>

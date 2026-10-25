@@ -194,7 +194,6 @@ def parse_args():
     parser.add_argument("--repo-root", default=".", help="Root of git repository (default: current dir)")
     parser.add_argument("--output-json", default=None, help="Path to save JSON proof report")
     parser.add_argument("--output-junit", default=None, help="Path to save JUnit XML report")
-    parser.add_argument("--dry-run", action="store_true", help="Simulate regression proof in safe mode")
     return parser.parse_args()
 
 
@@ -202,27 +201,7 @@ def main():
     args = parse_args()
     repo_root = Path(args.repo_root).resolve()
 
-    if args.dry_run or os.environ.get("SENTINEL_SIMULATION_MODE") == "true":
-        print("[+] [SIMULATION] Regression Proof evaluated in safe dry-run mode: PROVEN")
-        results: Dict[str, Any] = {
-            "verdict": "PROVEN",
-            "test_file": str(args.test or "tests/regressions/test_simulation.py"),
-            "broken_sha": args.broken,
-            "fix_sha": args.fix,
-            "broken_run": {"exit_code": 1, "outcome": "failed", "failure_type": "AssertionError", "summary": "AssertionError"},
-            "fix_run": {"exit_code": 0, "outcome": "passed", "failure_type": None, "summary": "1 passed"},
-            "rejection_reason": None,
-        }
-        if args.output_json:
-            out_json_path = Path(args.output_json)
-            out_json_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(out_json_path, "w", encoding="utf-8") as f:
-                json.dump(results, f, indent=2)
-        if args.output_junit:
-            out_junit_path = Path(args.output_junit)
-            generate_junit_xml(results, out_junit_path)
-        sys.exit(0)
-
+    # No dry-run or simulation switch on purpose: the verdict must always come from two real test runs.
     # Resolve test file
     test_abs = None
     if args.test:
@@ -231,12 +210,15 @@ def main():
             print(f"[-] Error: Regression test file not found at {test_abs}", file=sys.stderr)
             sys.exit(2)
     else:
-        reg_tests = sorted(repo_root.glob("tests/regressions/test_*.py"))
-        if reg_tests:
-            test_abs = reg_tests[-1].resolve()
-            print(f"[*] Discovered AI-generated regression test: {test_abs.relative_to(repo_root)}")
-        else:
-            print("[-] Error: Regression test file not specified (--test) and none discovered under tests/regressions/", file=sys.stderr)
+        # Repair branches are duo/fix/<incident_id>; their test is tests/regressions/test_<incident_id>.py
+        branch = os.environ.get("CI_MERGE_REQUEST_SOURCE_BRANCH_NAME", "")
+        if not branch.startswith("duo/fix/"):
+            print("[-] Error: --test not given and this is not a duo/fix/* merge request", file=sys.stderr)
+            sys.exit(2)
+        incident = branch[len("duo/fix/"):]
+        test_abs = (repo_root / "tests" / "regressions" / f"test_{incident.replace('-', '_')}.py").resolve()
+        if not test_abs.exists():
+            print(f"[-] Error: expected regression test {test_abs.relative_to(repo_root)} for {branch} was not found", file=sys.stderr)
             sys.exit(2)
 
     try:

@@ -3,7 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { GITLAB_URL } from '../api/client';
 import { useIncident, useSentinel } from '../api/source';
 import { AI, Loop, Outcome, Proof } from '../sections/Sections';
-import { MODE_COLOR, viewIncident } from '../state/derive';
+import { MODE_COLOR, accepted, viewIncident } from '../state/derive';
 import { useMission, useSceneFocus } from '../state/mission';
 import { Tilt } from '../ui/fx';
 import { Chip, Empty, EventList, PageHead, SecHead, Sha, ago, dateTime, dur, statusTone, statusWord } from '../ui/kit';
@@ -18,6 +18,7 @@ export default function IncidentRoom() {
   const status = base?.status ?? null;
   const [pick, setPick] = useState<number | undefined>(undefined);
   const events = timeline ?? [];
+  const ok = accepted(events);
   const view = viewIncident(detail, status ?? '', events, pick);
   useSceneFocus(base && status ? { mode: view.mode, stages: view.stages, key: id } : null);
 
@@ -37,12 +38,12 @@ export default function IncidentRoom() {
   const attempts = detail?.recovery_attempts ?? [];
   const att = view.attempt;
   const live = d.incidentActive && d.incident?.id === id;
-  const sealed = events.find((e) => e.type === 'evidence.collected');
-  const verified = events.find((e) => e.type === 'recovery.verified');
+  const sealed = ok.find((e) => e.type === 'evidence.collected');
+  const verified = ok.find((e) => e.type === 'recovery.verified');
   const allFindings = att?.gate_results.flatMap((g) => g.findings.map((f) => ({ ...f, gate: g.gate }))) ?? [];
   const branch = `duo/fix/${id}`;
   // The backend may leave detected_at empty; the recorded incident.detected event is the next-best source.
-  const detectedAt = base.detected_at || events.find((e) => e.type === 'incident.detected')?.at || '';
+  const detectedAt = base.detected_at || ok.find((e) => e.type === 'incident.detected')?.at || '';
 
   return (
     <div className="page page--room" style={{ ['--room' as string]: MODE_COLOR[view.mode] }}>

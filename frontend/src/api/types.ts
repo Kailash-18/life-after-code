@@ -76,6 +76,8 @@ export interface TimelineEvent {
   summary?: string;
   evidence_url?: string;
   data: Record<string, unknown>;
+  /** The backend recorded this event but refused it (bad source, illegal transition…). It proves nothing. */
+  rejected?: { code: string; message: string };
 }
 
 export interface SystemStatus {
@@ -176,12 +178,12 @@ export interface DisasterRecoveryStatus {
 
 export interface S3StorageStatus {
   storage_type: string;
-  bucket_name: string;
-  region: string;
+  bucket_name: string | null;
+  region: string | null;
   prefix: string;
   s3_connected: boolean;
   encryption: {
-    algorithm: string;
+    algorithm: string | null;
     kms_key_id: string | null;
     bucket_key_enabled: boolean;
   };

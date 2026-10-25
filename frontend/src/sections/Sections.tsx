@@ -242,7 +242,7 @@ export function Outcome({ status, attempt, verified, releases, num = '05', id = 
       <div className="outcome">
         <p className="outcome__word" data-reveal>{word}</p>
         <p className="outcome__line" data-reveal>
-          {state === 'confirmed' && verified && <>{verified.summary} <span className="muted">· <code>{verified.source}</code> job <code>{verified.job}</code> · {time(verified.at)}</span></>}
+          {state === 'confirmed' && verified && <>{verified.summary ?? 'Recovery verified by the post-redeploy evaluator.'} <span className="muted">· <code>{verified.source}</code> job <code>{verified.job}</code> · {time(verified.at)}</span></>}
           {state === 'confirmed' && !verified && 'The incident record says RECOVERED.'}
           {state === 'stopped' && status && <>{FAILURE_COPY[status] ?? status}. {attempt?.failure_reason}</>}
           {state === 'pending' && 'Recovery is not confirmed until the evaluator checks the redeployed release at full traffic.'}

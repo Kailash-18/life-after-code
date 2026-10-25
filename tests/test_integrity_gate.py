@@ -143,3 +143,15 @@ def test_integrity_gate_covers_nested_test_directories():
     assert proc.returncode == 1, proc.stdout
     assert "RULE_01_EXISTING_TESTS_MODIFIED" in proc.stdout
     assert "RULE_04_ASSERT_WEAKENED" in proc.stdout
+
+
+def test_integrity_gate_cannot_be_switched_into_pass_mode():
+    """A repair MR can set variables in its own pipeline, so no flag or env var may make the gate pass."""
+    import os
+    patch_path = FIXTURES_DIR / "04_weakens_assert.patch"
+    env = {**os.environ, "SENTINEL_SIMULATION_MODE": "true"}
+    proc = subprocess.run([sys.executable, str(GATE_SCRIPT), "--diff-file", str(patch_path)], capture_output=True, text=True, env=env)
+    assert proc.returncode == 1, proc.stdout
+    assert "RULE_04_ASSERT_WEAKENED" in proc.stdout
+    dry = subprocess.run([sys.executable, str(GATE_SCRIPT), "--diff-file", str(patch_path), "--dry-run"], capture_output=True, text=True)
+    assert dry.returncode != 0

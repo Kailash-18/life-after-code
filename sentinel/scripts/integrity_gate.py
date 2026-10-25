@@ -341,20 +341,13 @@ def main():
     parser.add_argument("--repo-root", default=".", help="Root of git repository")
     parser.add_argument("--output-json", default=None, help="Path to write JSON report")
     parser.add_argument("--output-junit", default=None, help="Path to write JUnit XML report")
-    parser.add_argument("--dry-run", action="store_true", help="Simulate integrity verification in safe mode")
     args = parser.parse_args()
 
     repo_root = Path(args.repo_root).resolve()
 
-    if args.dry_run or os.environ.get("SENTINEL_SIMULATION_MODE") == "true":
-        print("[+] [SIMULATION] Integrity Gate evaluated in safe dry-run mode: PASS (0 blocking findings)")
-        report = {
-            "verdict": "PASS",
-            "findings": [],
-            "summary": {"total_findings": 0, "blocking_count": 0, "warning_count": 0},
-            "uncertainty_note": "Simulated verification in dry-run mode certified clean.",
-        }
-    elif args.diff_file:
+    # No dry-run or simulation switch on purpose: a gate that can be told to pass is not a gate.
+    # (A repair MR could set such a variable in its own pipeline.)
+    if args.diff_file:
         diff_path = Path(args.diff_file).resolve()
         if not diff_path.exists():
             print(f"[-] Diff file not found: {diff_path}", file=sys.stderr)

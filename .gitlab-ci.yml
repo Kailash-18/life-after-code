@@ -462,8 +462,14 @@ merge:auto-merge:
   image: python:3.11-slim
   before_script:
     - pip install jsonschema requests
+  # Runs only after both gate jobs succeeded (same pipeline, earlier stage), and reads their reports.
+  needs:
+    - job: gate:regression-proof
+      artifacts: true
+    - job: gate:integrity-gate
+      artifacts: true
   script:
-    - echo "==> All required gates green. Executing autonomous merge with project token"
-    - python sentinel/scripts/auto_merge.py --mr-iid $CI_MERGE_REQUEST_IID --fix-sha $CI_COMMIT_SHA --dry-run
+    - echo "==> All required gates green. Merging with the project token (GITLAB_PROJECT_TOKEN, masked)"
+    - python sentinel/scripts/auto_merge.py --project-id "$CI_PROJECT_ID" --mr-iid "$CI_MERGE_REQUEST_IID" --fix-sha "$CI_COMMIT_SHA" --incident-id "${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME#duo/fix/}"
   rules:
     - if: $CI_MERGE_REQUEST_IID && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^duo\/fix\//

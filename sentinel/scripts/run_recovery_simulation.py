@@ -26,10 +26,9 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from sentinel.scripts.emit_event import emit_event
 from sentinel.scripts.evaluator import run_evaluation
-from sentinel.scripts.rollback import execute_rollback
+from sentinel.scripts.rollback import execute_rollback, run_post_rollback_probe
 from sentinel.scripts.evidence_collector import build_evidence_bundle
 from sentinel.scripts.sast_gate import run_sast_scan
-from sentinel.scripts.auto_merge import run_auto_merge
 
 
 def print_step(step_num: int, title: str, description: str) -> None:
@@ -205,7 +204,9 @@ def simulate_full_recovery_loop(
 
     # STEP 3: Automated Rollback to Known-Good
     print_step(3, "Automated Rollback Executed", "100% traffic instantly restored to last known-good revision; post-rollback probe confirms healthy.")
-    execute_rollback(
+    # This is a simulation: traffic is not really moved, so the event is labelled as simulated.
+    # The probe itself is real (it hits the stable app), so the backend still decides from a measured result.
+    rb = execute_rollback(
         service_name="sentinel-target-app",
         stable_url=stable_app_url,
         known_good_rev="sentinel-target-app-rev-known-good",
@@ -216,6 +217,24 @@ def simulate_full_recovery_loop(
         release_id=release_id,
         incident_id=inc_id,
         dry_run=True,
+        emit_to_backend=False,
+    )
+    probe = run_post_rollback_probe(stable_url=stable_app_url, sample_count=6)
+    emit_event(
+        event_type="rollback.completed",
+        source="sentinel-simulation:rollback",
+        pipeline_id=pipe_id,
+        job_id=f"{pipe_id}03",
+        commit_sha=broken_sha,
+        release_id=release_id,
+        incident_id=inc_id,
+        data={
+            "revision_name": rb["restored_revision"],
+            "traffic_percent": 100,
+            "target": "stable",
+            "post_rollback_probe_ok": bool(probe["probe_ok"]),
+            "simulated_traffic_shift": True,
+        },
     )
     time.sleep(delay_between_steps)
 
@@ -324,15 +343,18 @@ def simulate_full_recovery_loop(
 
     # STEP 9: Gate-Controlled Autonomous Merge
     print_step(9, "Autonomous Merge Completed", "All gates green. Project token executes merge without human intervention.")
-    merge_res = run_auto_merge(
-        project_id="project-sentinel",
-        mr_iid=mr_iid,
-        fix_sha=fix_sha,
-        incident_id=inc_id,
+    # Simulation: there is no GitLab MR to merge, so the merge event is sent and labelled as simulated.
+    # (auto_merge.py itself never reports a merge that GitLab did not confirm.)
+    emit_event(
+        event_type="merge.completed",
+        source="sentinel-simulation:merge",
         pipeline_id=pipe_id,
         job_id=f"{pipe_id}09",
-        dry_run=True,
+        commit_sha=fix_sha,
+        incident_id=inc_id,
+        data={"mr_iid": mr_iid, "fix_sha": fix_sha, "verdict": "PASS", "simulated_merge": True},
     )
+    merge_res = {"status": "SIMULATED", "mr_iid": mr_iid, "fix_sha": fix_sha}
     time.sleep(delay_between_steps)
 
     # STEP 10: Redeploying Fixed Candidate Revision via Canary
