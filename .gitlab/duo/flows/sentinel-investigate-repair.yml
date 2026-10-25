@@ -135,15 +135,12 @@ prompts:
         1. Read the suspected file(s) and make the smallest change that fixes the root cause in application
            code under app/app/. Do not refactor or reformat anything else.
         2. Write TEST. It must:
-           - start with:
-               import sys
-               from pathlib import Path
-               sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "app"))
-           - import the FastAPI app (from app.main import app), set app.config.settings.fault_injection_mode = False,
-             and call the failing endpoint through fastapi.testclient.TestClient,
-           - check the behaviour with plain assert statements (status code first, then the values that were wrong),
-             so that on the broken commit it fails with an AssertionError, not a crash,
-           - contain one test function named test_<incident_id with - replaced by _>_<short_description>.
+           - use the `client` fixture that tests/regressions/conftest.py already provides (a TestClient for the
+             demo app); do not add imports of the app, sys.path changes or a conftest of your own,
+           - call the failing endpoint through `client` and check the behaviour with plain assert statements
+             (status code first, then the values that were wrong), so that on the broken commit it fails with an
+             AssertionError, not a crash,
+           - contain one test function named test_<incident_id with - replaced by _>_<short_description>(client).
         3. create_branch "duo/fix/<incident_id>" from the project's default branch.
         4. create_commit on that branch with exactly these files:
            - the fixed application file(s),

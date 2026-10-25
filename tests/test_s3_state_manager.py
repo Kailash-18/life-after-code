@@ -56,7 +56,8 @@ def test_s3_rollback_to_snapshot():
         service_name="sentinel-target-app",
         dry_run=True,
     )
-    assert rb_res["post_rollback_probe_ok"] is True
+    # dry run: the snapshot is verified, but no traffic moved, so no healthy probe is claimed
+    assert rb_res["post_rollback_probe_ok"] is False
     assert rb_res["s3_snapshot_id"] == snap_id
     assert rb_res["s3_integrity_verified"] is True
     assert rb_res["restored_revision"] == "sentinel-target-app-known-good-rev001"

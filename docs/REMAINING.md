@@ -35,11 +35,18 @@ Found and fixed on the way (Kailash, please review):
   latency ratio and the Mann-Whitney test now also need a p95 slowdown > `latency_ratio_min_delta_ms`
   (50 ms). Before: healthy release falsely failed 4/12 runs; after: 25/25 PASS, faulty 10/10 FAIL.
 
-Still open (Kailash's scripts, not changed):
-- `rollback.py` reports `success` with mode `fallback_local` when gcloud fails, and hard-codes
-  `post_rollback_probe_ok: true` in simulation mode: the backend would record a rollback that did not happen.
-- `auto_merge.py` falls back to a "simulated merge" with a hard-coded SHA when the GitLab API fails, and
-  still emits `merge.completed`.
+Fixed after review (Samvit, Oct 25):
+- `rollback.py` no longer reports `success` when gcloud fails, and never invents a healthy probe: a dry run
+  is labelled `SIMULATED` and sends no event; a failed traffic shift is `ROLLBACK_FAILED`.
+- `auto_merge.py` no longer fakes a merge or a merge SHA. It merges only when both gate reports exist on disk
+  and passed (no `SENTINEL_*_PASSED` env overrides), and emits `merge.completed` only for a merge GitLab confirmed.
+  The CI merge job now runs for real (`needs` both gate jobs; requires masked `GITLAB_PROJECT_TOKEN`).
+- `integrity_gate.py` / `regression_proof.py`: removed `--dry-run` and `SENTINEL_SIMULATION_MODE`, which made
+  both gates PASS without checking. A repair MR could set that variable in its own pipeline.
+  `regression_proof.py` no longer guesses "the newest test file"; it uses `--test` or the `duo/fix/<id>` branch.
+- `run_recovery_simulation.py` sends its rollback and merge events labelled `sentinel-simulation:*`.
+- Root tests use the in-memory store (`tests/conftest.py`), so a leftover `sentinel.db` no longer breaks reruns.
+- Mission Control shows events the backend refused as "refused" and never lets them light a stage.
 
 ## Backend audit (Krishna, Oct 24) — fixed
 

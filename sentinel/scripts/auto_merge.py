@@ -24,43 +24,33 @@ if str(PROJECT_ROOT) not in sys.path:
 from sentinel.scripts.emit_event import emit_event
 
 
+def _read_verdict(art_dir: Path, names: list[str]) -> str:
+    """Verdict from the first report that exists; MISSING if none does. Never inferred from env vars."""
+    for name in names:
+        f = art_dir / name
+        if f.exists():
+            try:
+                return str(json.loads(f.read_text(encoding="utf-8")).get("verdict", "FAIL")).upper()
+            except (json.JSONDecodeError, OSError):
+                return "UNREADABLE"
+    return "MISSING"
+
+
 def verify_gate_reports(artifacts_dir: str | Path = "artifacts") -> dict[str, Any]:
+    """Every required gate must have a report on disk that says it passed (PROVEN counts for the regression proof)."""
     art_dir = Path(artifacts_dir)
-    gate_statuses: dict[str, str] = {}
-
-    # 1. Integrity Gate Report
-    integrity_file = art_dir / "integrity-gate-report.json"
-    if integrity_file.exists():
-        with open(integrity_file, encoding="utf-8") as f:
-            data = json.load(f)
-            gate_statuses["integrity_gate"] = data.get("verdict", "FAIL").upper()
-    else:
-        # Fallback check if test ran
-        gate_statuses["integrity_gate"] = "PASS" if os.environ.get("SENTINEL_INTEGRITY_PASSED") == "true" else "UNKNOWN"
-
-    # 2. Regression Proof Report
-    proof_file = art_dir / "regression-proof-report.json"
-    if proof_file.exists():
-        with open(proof_file, encoding="utf-8") as f:
-            data = json.load(f)
-            gate_statuses["regression_proof"] = data.get("verdict", "FAIL").upper()
-    else:
-        gate_statuses["regression_proof"] = "PASS" if os.environ.get("SENTINEL_PROOF_PASSED") == "true" else "UNKNOWN"
-
-    # 3. SAST Gate Report
-    sast_file = art_dir / "sast-report.json"
-    if sast_file.exists():
-        with open(sast_file, encoding="utf-8") as f:
-            data = json.load(f)
-            gate_statuses["sast_gate"] = data.get("verdict", "FAIL").upper()
-    else:
-        gate_statuses["sast_gate"] = "PASS"
-
-    all_passed = all(status == "PASS" for status in gate_statuses.values())
-    return {
-        "all_passed": all_passed,
-        "gates": gate_statuses,
+    gate_statuses = {
+        # The gate jobs write integrity-gate.json / regression-proof.json; older names kept for compatibility.
+        "integrity_gate": _read_verdict(art_dir, ["integrity-gate.json", "integrity-gate-report.json"]),
+        "regression_proof": _read_verdict(art_dir, ["regression-proof.json", "regression-proof-report.json"]),
     }
+    sast = _read_verdict(art_dir, ["sast-report.json"])
+    if sast != "MISSING":  # optional gate: only counts when its job produced a report
+        gate_statuses["sast_gate"] = sast
+
+    passing = {"integrity_gate": {"PASS"}, "regression_proof": {"PROVEN", "PASS"}, "sast_gate": {"PASS"}}
+    all_passed = all(v in passing[k] for k, v in gate_statuses.items())
+    return {"all_passed": all_passed, "gates": gate_statuses}
 
 
 def execute_gitlab_merge(
@@ -69,34 +59,32 @@ def execute_gitlab_merge(
     gitlab_token: str | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
+    """Ask GitLab to merge the MR. A dry run or any failure returns merged=False; nothing is ever faked."""
     print(f"[*] Executing automated merge for MR !{mr_iid} in project {project_id}...")
-    token = gitlab_token or os.environ.get("GITLAB_PROJECT_TOKEN") or os.environ.get("CI_JOB_TOKEN")
+    token = gitlab_token or os.environ.get("GITLAB_PROJECT_TOKEN")
 
-    if dry_run or not token or os.environ.get("SENTINEL_SIMULATION_MODE") == "true":
-        print(f"[+] [SIMULATION] PUT /api/v4/projects/{project_id}/merge_requests/{mr_iid}/merge (merged_when_pipeline_succeeds=true)")
-        return {
-            "merged": True,
-            "mode": "simulation",
-            "merge_commit_sha": "c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",
-        }
+    if dry_run or os.environ.get("SENTINEL_SIMULATION_MODE") == "true":
+        print(f"[+] [SIMULATION] would PUT /projects/{project_id}/merge_requests/{mr_iid}/merge — nothing merged")
+        return {"merged": False, "mode": "simulation"}
+    if not token:
+        return {"merged": False, "mode": "no_token", "error": "GITLAB_PROJECT_TOKEN is not set"}
 
-    api_url = f"https://gitlab.com/api/v4/projects/{project_id}/merge_requests/{mr_iid}/merge"
+    api_base = os.environ.get("CI_API_V4_URL", "https://gitlab.com/api/v4").rstrip("/")
+    api_url = f"{api_base}/projects/{project_id}/merge_requests/{mr_iid}/merge"
+    body = json.dumps({"should_remove_source_branch": True}).encode("utf-8")
     req = urllib.request.Request(
-        api_url,
+        api_url, data=body,
         headers={"PRIVATE-TOKEN": token, "Content-Type": "application/json"},
         method="PUT",
     )
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=15) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-            return {
-                "merged": True,
-                "mode": "gitlab_api",
-                "merge_commit_sha": data.get("merge_commit_sha", "c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"),
-            }
     except Exception as e:
-        print(f"[!] Warning: GitLab API merge call failed ({e}); falling back to simulated merge.", file=sys.stderr)
-        return {"merged": True, "mode": "fallback_simulated", "merge_commit_sha": "c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"}
+        return {"merged": False, "mode": "gitlab_api", "error": str(e)}
+    sha = data.get("merge_commit_sha") or data.get("squash_commit_sha")
+    merged = data.get("state") == "merged" and bool(sha)
+    return {"merged": merged, "mode": "gitlab_api", "merge_commit_sha": sha, "state": data.get("state")}
 
 
 def run_auto_merge(
@@ -117,14 +105,18 @@ def run_auto_merge(
     print(f"    Regression Proof: [{gate_eval['gates'].get('regression_proof', 'N/A')}]")
     print(f"    SAST Gate:        [{gate_eval['gates'].get('sast_gate', 'N/A')}]")
 
-    if not gate_eval["all_passed"] and not dry_run:
-        failed_gates = [g for g, st in gate_eval["gates"].items() if st != "PASS"]
+    if not gate_eval["all_passed"]:
+        failed_gates = [g for g, st in gate_eval["gates"].items() if st not in ("PASS", "PROVEN")]
         raise RuntimeError(f"Auto-merge blocked! Gates did not pass: {failed_gates}")
 
     merge_res = execute_gitlab_merge(project_id, mr_iid, dry_run=dry_run)
-    merge_sha = merge_res.get("merge_commit_sha", fix_sha)
+    if not merge_res["merged"]:
+        if merge_res["mode"] == "simulation":
+            return {"status": "SIMULATED", "mr_iid": mr_iid, "fix_sha": fix_sha, "merge_res": merge_res, "gates": gate_eval["gates"]}
+        raise RuntimeError(f"Merge did not happen ({merge_res.get('mode')}): {merge_res.get('error') or merge_res.get('state')}")
+    merge_sha = merge_res["merge_commit_sha"]
 
-    # Emit merge.completed
+    # Emit merge.completed only for a merge GitLab confirmed
     if emit_to_backend:
         try:
             emit_event(
@@ -155,8 +147,8 @@ def run_auto_merge(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Sentinel Autonomous Merge Controller")
     parser.add_argument("--project-id", default=os.environ.get("CI_PROJECT_ID", "project-sentinel"), help="GitLab Project ID")
-    parser.add_argument("--mr-iid", type=int, default=1, help="Merge Request IID")
-    parser.add_argument("--fix-sha", default="a1b2c3d4e5f678901234567890abcdef12345678", help="Commit SHA of proposed fix")
+    parser.add_argument("--mr-iid", type=int, required=True, help="Merge Request IID")
+    parser.add_argument("--fix-sha", required=True, help="Commit SHA of proposed fix")
     parser.add_argument("--incident-id", help="Sentinel incident ID")
     parser.add_argument("--pipeline-id", help="GitLab CI Pipeline ID")
     parser.add_argument("--job-id", help="GitLab CI Job ID")
@@ -177,7 +169,7 @@ def main() -> None:
         dry_run=args.dry_run,
         emit_to_backend=not args.no_emit,
     )
-    print(f"[+] Merge completed successfully: MR !{res['mr_iid']}")
+    print(f"[+] {res['status']}: MR !{res['mr_iid']}")
 
 
 if __name__ == "__main__":

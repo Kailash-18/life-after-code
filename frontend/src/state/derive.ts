@@ -47,14 +47,16 @@ export const FAILURE_COPY: Record<string, string> = {
 
 export const isFailure = (s: string) => (TERMINAL_FAILURES as readonly string[]).includes(s);
 
-const lastOf = (events: TimelineEvent[], types: string[]) => [...events].reverse().find((e) => types.includes(e.type));
+/** Events the backend accepted. Refused events stay in the ledger but never light a stage. */
+export const accepted = (events: TimelineEvent[]) => events.filter((e) => !e.rejected);
+const lastOf = (events: TimelineEvent[], types: string[]) => [...events].reverse().find((e) => !e.rejected && types.includes(e.type));
 
 const stageOf = (type: string) => RECOVERY_PATH.findIndex((s) => STAGES[s].events.includes(type));
 const failing = (e: TimelineEvent) => e.data?.verdict === 'FAIL' || e.data?.outcome === 'no_fix_found';
 
 /** Where a failure without a fixed stage (ESCALATED, TIMED_OUT) stopped, read from the recorded events. */
 function failurePoint(events: TimelineEvent[]): number {
-  const last = [...events].reverse().find((e) => stageOf(e.type) >= 0);
+  const last = [...events].reverse().find((e) => !e.rejected && stageOf(e.type) >= 0);
   if (!last) return 0;
   if (last.type === 'flow.completed' && last.data?.outcome === 'no_fix_found') return RECOVERY_PATH.indexOf('INVESTIGATING');
   const i = stageOf(last.type);

@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useSentinel } from '../api/source';
 import type { Release, TimelineEvent } from '../api/types';
-import { MODE_COLOR } from '../state/derive';
+import { MODE_COLOR, accepted } from '../state/derive';
 import { useMission } from '../state/mission';
 import { Tilt } from '../ui/fx';
 import { Chip, EventData, PageHead, Ring, SecHead, Sha, ago, dateTime, dur, ms, num, pct, time } from '../ui/kit';
@@ -47,7 +47,7 @@ export default function Rollout() {
   const st = snap.status;
   const releases = useMemo(() => snap.releases ?? [], [snap.releases]);
   const byId = useMemo(() => new Map(releases.map((r) => [r.id, r])), [releases]);
-  const evs = snap.events;
+  const evs = accepted(snap.events);
   const defaultRel = st?.candidate_release?.id ?? [...releases].reverse().find((r) => evs.some((e) => e.release_id === r.id && e.type === 'deploy.canary_started'))?.id ?? releases[releases.length - 1]?.id;
   const [pick, setPick] = useState<string | null>(null);
   const sel = byId.get(pick ?? defaultRel ?? '') ?? null;

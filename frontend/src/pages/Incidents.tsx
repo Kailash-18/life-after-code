@@ -17,7 +17,7 @@ export default function Incidents() {
   const list = all.filter((i) => f === 'all' || cls(i.status) === f);
   const count = (k: Filter) => all.filter((i) => k === 'all' || cls(i.status) === k).length;
   const ttr = all.map((i) => {
-    const v = snap.timelines[i.id]?.find((e) => e.type === 'recovery.verified');
+    const v = snap.timelines[i.id]?.find((e) => !e.rejected && e.type === 'recovery.verified');
     return v ? Date.parse(v.at) - Date.parse(i.detected_at) : NaN;
   }).filter(Number.isFinite).sort((a, b) => a - b);
   const median = ttr.length ? ttr[Math.floor(ttr.length / 2)] : null;
@@ -51,7 +51,7 @@ export default function Incidents() {
               const stages = buildStages(i.status, tl);
               const rel = snap.releases?.find((r) => r.id === i.release_id);
               const live = d.incidentActive && d.incident?.id === i.id;
-              const recovered = tl.find((e) => e.type === 'recovery.verified');
+              const recovered = tl.find((e) => !e.rejected && e.type === 'recovery.verified');
               return (
                 <li key={i.id} data-reveal style={{ ['--i' as string]: n }}>
                   <Link to={`/incidents/${encodeURIComponent(i.id)}`} className="inc-link" data-cursor="Enter">

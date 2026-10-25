@@ -74,8 +74,9 @@ def execute_cloud_run_traffic_shift(
         out = subprocess.check_output(cmd, text=True, stderr=subprocess.STDOUT)
         return {"success": True, "output": out, "mode": "gcloud"}
     except Exception as e:
-        print(f"[!] Warning: gcloud command failed or not installed ({e}); recording simulated rollback.", file=sys.stderr)
-        return {"success": True, "revisions": {target_revision: 100}, "mode": "fallback_local"}
+        # Never record a rollback that did not happen: report the failure instead.
+        print(f"[-] gcloud traffic shift failed ({e}); traffic was NOT moved.", file=sys.stderr)
+        return {"success": False, "mode": "failed", "error": str(e)}
 
 
 def run_post_rollback_probe(
@@ -183,25 +184,21 @@ def execute_rollback(
     )
 
     # 3. Post-Rollback Authoritative Probe
-    if dry_run or os.environ.get("SENTINEL_SIMULATION_MODE") == "true":
-        probe_res = {
-            "samples": 15,
-            "successes": 15,
-            "errors": 0,
-            "error_rate": 0.0,
-            "probe_ok": True,
-        }
+    simulated = dry_run or os.environ.get("SENTINEL_SIMULATION_MODE") == "true"
+    if simulated:
+        # A simulation proves nothing: no probe result is invented and no event is sent.
+        probe_res = {"samples": 0, "successes": 0, "errors": 0, "error_rate": 0.0, "probe_ok": False, "simulated": True}
     else:
         probe_res = run_post_rollback_probe(stable_url=stable_url, sample_count=15)
-    probe_ok = probe_res["probe_ok"]
+    probe_ok = bool(traffic_res.get("success")) and bool(probe_res["probe_ok"]) and not simulated
 
-    status_str = "SUCCESSFUL" if probe_ok else "UNHEALTHY"
+    status_str = "SIMULATED (not a rollback)" if simulated else "SUCCESSFUL" if probe_ok else "FAILED" if not traffic_res.get("success") else "UNHEALTHY"
     print(f"\n[+] Rollback verification complete: {status_str}")
     print(f"    Restored Revision: {target_rev} (100% traffic)")
     print(f"    Post-Rollback Probe OK: {probe_ok} (Errors: {probe_res['errors']}/{probe_res['samples']})")
 
     report = {
-        "status": "ROLLED_BACK",
+        "status": "SIMULATED" if simulated else ("ROLLED_BACK" if probe_ok else "ROLLBACK_FAILED"),
         "timestamp": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "service": service_name,
         "candidate_revision": candidate_rev,
@@ -222,8 +219,8 @@ def execute_rollback(
     with open(report_path, "w", encoding="utf-8") as f:
         json.dump(report, f, indent=2)
 
-    # 4. Emit rollback.completed
-    if emit_to_backend:
+    # 4. Emit rollback.completed (only for a real attempt; the backend decides from post_rollback_probe_ok)
+    if emit_to_backend and not simulated:
         try:
             emit_event(
                 event_type="rollback.completed",

@@ -104,11 +104,15 @@ export function toTimeline(v: unknown): TimelineEvent[] {
       const at = str(o.at) ?? str(o.sent_at) ?? str(o.received_at);
       if (!at) return null;
       const data = obj(o.data);
+      const rej = obj(data._rejected);
+      const rejected = o.rejected === true || Object.keys(rej).length
+        ? { code: str(rej.code) ?? 'REJECTED', message: str(rej.message) ?? 'The backend refused this event.' }
+        : undefined;
       return {
         id: str(o.id) ?? `${str(o.type)}-${at}`, type: str(o.type) ?? 'event', source: str(o.source) ?? 'unknown source',
         job: str(o.source_job_id) ?? str(o.job_id), pipeline_id: str(o.pipeline_id), commit_sha: str(o.commit_sha),
         release_id: str(o.release_id), incident_id: str(o.incident_id) ?? (str(o.entity_type) === 'Incident' ? str(o.entity_id) : undefined),
-        at, summary: str(o.summary) ?? str(data.summary), evidence_url: str(o.evidence_url) ?? str(o.artifact_url), data,
+        at, summary: str(o.summary) ?? str(data.summary), evidence_url: str(o.evidence_url) ?? str(o.artifact_url), data, rejected,
       };
     })
     .filter((e): e is TimelineEvent => !!e)

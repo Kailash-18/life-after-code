@@ -35,7 +35,19 @@ def test_full_recovery_simulation_loop():
             for k, v in req.header_items():
                 headers[k] = v
         data = req.data
-        
+
+        if url.startswith("http://localhost:8080"):
+            # The stable demo app answers the post-rollback probe as healthy.
+            class AppOK:
+                status = 200
+                def read(self):
+                    return b'{"status":"ok"}'
+                def __enter__(self):
+                    return self
+                def __exit__(self, *args):
+                    pass
+            return AppOK()
+
         path = url.split("http://localhost:8000")[-1]
         
         response = client.request(

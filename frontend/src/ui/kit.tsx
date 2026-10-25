@@ -155,6 +155,7 @@ export const EVENT_KIND: Record<string, { kind: 'deploy' | 'health' | 'recovery'
 export const kindOf = (t: string) => EVENT_KIND[t]?.kind ?? 'deploy';
 
 function eventTone(e: TimelineEvent): string {
+  if (e.rejected) return 'is-refused';
   const v = e.data?.verdict;
   if (kindOf(e.type) === 'ai') return 'is-ai';
   if (e.type === 'recovery.verified') return 'is-proof';
@@ -189,8 +190,8 @@ export function EventList({ events, showIncident, now }: { events: TimelineEvent
           <li key={e.id} id={`ev-${e.id}`} className={eventTone(e)} data-reveal>
             <time title={e.at}>{time(e.at)}<small>{now ? ago(e.at, now) : ''}</small></time>
             <div>
-              <p className="ledger__type">{EVENT_KIND[e.type]?.label ?? e.type}<code>{e.type}</code>{ai && <span className="tag-ai">AI · advisory</span>}</p>
-              {e.summary && <p>{e.summary}</p>}
+              <p className="ledger__type">{EVENT_KIND[e.type]?.label ?? e.type}<code>{e.type}</code>{ai && <span className="tag-ai">AI · advisory</span>}{e.rejected && <span className="tag-refused">refused · {e.rejected.code}</span>}</p>
+              {e.rejected ? <p className="ledger__refused">{e.rejected.message} This event did not change the incident.</p> : e.summary && <p>{e.summary}</p>}
               <EventData e={e} />
               <p className="ledger__src">
                 <code>{e.source}</code>{e.job && <code>job {e.job}</code>}
