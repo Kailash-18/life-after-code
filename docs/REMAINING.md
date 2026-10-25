@@ -63,6 +63,18 @@ Fixed after review (Samvit, Oct 25):
 - A commit that fails again after its incident closed opens a fresh incident instead of being lost.
 - GitLab pipeline/job webhooks now appear on the incident timeline; event bodies over 256 KB are refused.
 
+## CI fixes (Krishna, Oct 25)
+
+- `variables:` used `${VAR:-default}`, which GitLab does not support there; now plain defaults
+  that project CI/CD variables override.
+- The HMAC secret had a default value in this public file. Removed: set `SENTINEL_HMAC_SECRET` as a
+  protected + masked project variable. The old value is in git history, so never use it as the real secret.
+- Deploy / evaluate / rollback / evidence jobs ran only on `main` while the default branch is `master`;
+  rules now use `$CI_DEFAULT_BRANCH`.
+- Still open (Kailash): those jobs still pass `--dry-run`, and the evaluator probes the placeholder URL
+  `http://sentinel-target-app:8080`. Until they deploy and probe the real Cloud Run URLs, an incident
+  cannot get past DETECTED on GitLab (a dry-run rollback now honestly sends no event).
+
 ## Should fix
 
 - **Signing secrets.** Remove the hard-coded HMAC fallbacks (`.gitlab-ci.yml`, `backend/app/config.py`, `emit_event.py`). Set a masked CI variable and a Secret Manager entry instead. (Kailash, Krishna)
