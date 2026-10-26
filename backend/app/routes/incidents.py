@@ -64,3 +64,15 @@ async def get_incident_timeline(incident_id: str):
         }
         for e in events
     ]
+
+
+@router.get("/{incident_id}/postmortem")
+async def get_incident_postmortem(incident_id: str):
+    """
+    Tier 2 Feature 8: Auto-Written Postmortem.
+    Generates a complete GitLab MR / Issue Markdown report from incident timeline,
+    root cause analysis, evidence SHA-256 hashes, and permanent regression proof.
+    """
+    from sentinel.scripts.postmortem_generator import generate_postmortem_bundle
+    return generate_postmortem_bundle(incident_id=incident_id)
+

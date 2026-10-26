@@ -53,3 +53,11 @@ export const getEBPFTelemetry = (signal?: AbortSignal) => getJSON('/api/v1/sre/e
 export const getDisasterRecoveryStatus = (signal?: AbortSignal) => getJSON('/api/v1/sre/dr', signal) as Promise<DisasterRecoveryStatus>;
 export const getAdaptiveDriftStatus = (signal?: AbortSignal) => getJSON('/api/v1/sre/drift', signal) as Promise<AdaptiveDriftStatus>;
 export const getS3StorageStatus = (signal?: AbortSignal) => getJSON('/api/v1/state/storage', signal) as Promise<S3StorageStatus>;
+
+export const getCanaryDiffRisk = (signal?: AbortSignal) => getJSON('/api/v1/sre/diff-risk', signal) as Promise<import('./types').DiffRiskReport>;
+export const getShadowTrafficReplay = (incidentId?: string, signal?: AbortSignal) =>
+  getJSON(`/api/v1/sre/shadow-replay?incident_id=${encodeURIComponent(incidentId ?? 'inc-demo-003')}`, signal) as Promise<import('./types').ShadowReplayReport>;
+export const getMeasuredCarbon = (signal?: AbortSignal) => getJSON('/api/v1/sre/carbon', signal) as Promise<import('./types').MeasuredCarbonReport>;
+export const getIncidentPostmortem = (incidentId: string, signal?: AbortSignal) =>
+  getJSON(`/api/v1/incidents/${encodeURIComponent(incidentId)}/postmortem`, signal) as Promise<import('./types').PostmortemBundle>;
+

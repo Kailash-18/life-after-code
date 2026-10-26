@@ -1,10 +1,10 @@
 import { Fragment, useEffect, useState } from 'react';
 import {
   API_BASE, GITLAB_URL,
-  getAdaptiveDriftStatus, getDisasterRecoveryStatus, getEBPFTelemetry, getOPACompliance, getS3StorageStatus, getSRECompositeHealth,
+  getAdaptiveDriftStatus, getDisasterRecoveryStatus, getMeasuredCarbon, getEBPFTelemetry, getOPACompliance, getS3StorageStatus, getSRECompositeHealth,
 } from '../api/client';
 import { useSentinel } from '../api/source';
-import type { AdaptiveDriftStatus, DataSource, DisasterRecoveryStatus, EBPFTelemetryReport, OPAComplianceReport, S3StorageStatus, SRECompositeHealth } from '../api/types';
+import type { AdaptiveDriftStatus, DataSource, MeasuredCarbonReport, DisasterRecoveryStatus, EBPFTelemetryReport, OPAComplianceReport, S3StorageStatus, SRECompositeHealth } from '../api/types';
 import { useMission } from '../state/mission';
 import { Badge, Empty, PageHead, Section, ago } from '../ui/kit';
 
@@ -83,6 +83,7 @@ function Simulated() {
   const [ebpf, setEbpf] = useState<EBPFTelemetryReport | null>(null);
   const [dr, setDr] = useState<DisasterRecoveryStatus | null>(null);
   const [drift, setDrift] = useState<AdaptiveDriftStatus | null>(null);
+  const [carbon, setCarbon] = useState<MeasuredCarbonReport | null>(null);
   useEffect(() => {
     if (!open || source !== 'live') return;
     const ctrl = new AbortController();
@@ -91,6 +92,7 @@ function Simulated() {
     getEBPFTelemetry(ctrl.signal).then(setEbpf).catch(() => {});
     getDisasterRecoveryStatus(ctrl.signal).then(setDr).catch(() => {});
     getAdaptiveDriftStatus(ctrl.signal).then(setDrift).catch(() => {});
+    getMeasuredCarbon(ctrl.signal).then(setCarbon).catch(() => {});
     return () => ctrl.abort();
   }, [open, source]);
   const sreRows: Row[] | null = sre && (sre.health_score === null || !sre.error_budget || !sre.hypothesis_testing
@@ -108,6 +110,7 @@ function Simulated() {
             <SimCard title="eBPF socket traces" status={ebpf?.status} rows={ebpf && [['transport score', ebpf.mean_transport_health_score], ['server TTFB', `${ebpf.latency_decomposition_averages_ms.server_ttfb} ms`], ['TCP retransmits', ebpf.kernel_socket_aggregates.total_tcp_retransmits]]} ds={ebpf?.data_source} />
             <SimCard title="Disaster-recovery drill" status={dr?.status} rows={dr && [['regions', `${dr.primary_region} → ${dr.secondary_region}`], ['RTO', `${dr.rto_seconds}s`], ['RPO', `${dr.rpo_seconds}s`]]} ds={dr?.data_source} />
             <SimCard title="Latency drift (CUSUM)" status={drift?.status} rows={drift && [['observed', drift.observed_value], ['EWMA', drift.current_ewma], ['drift', drift.drift_detected ? 'yes' : 'no']]} ds={drift?.data_source} />
+            <SimCard title="SCI carbon intensity" status={carbon?.verdict} rows={carbon && [['SCI', `${carbon.sci_score} ${carbon.sci_unit}`], ['grid', `${carbon.grid_name} (${carbon.carbon_free_energy_pct}% CFE)`], ['mode', carbon.measurement_mode]]} ds={carbon ? { kind: carbon.is_measured ? 'measured' : 'simulated', note: carbon.telemetry_source } : undefined} />
           </div>
         )}
       </div>

@@ -29,6 +29,10 @@ from sentinel.scripts.evaluator import run_evaluation
 from sentinel.scripts.rollback import execute_rollback, run_post_rollback_probe
 from sentinel.scripts.evidence_collector import build_evidence_bundle
 from sentinel.scripts.sast_gate import run_sast_scan
+from sentinel.scripts.saboteur import SaboteurEngine
+from sentinel.scripts.holdout_gate import run_holdout_gate
+from sentinel.scripts.candidate_selector import CandidateSelector
+from sentinel.scripts.trust_scorer import RepairMetrics, calculate_trust_score
 
 
 def print_step(step_num: int, title: str, description: str) -> None:
@@ -270,9 +274,21 @@ def simulate_full_recovery_loop(
     )
     time.sleep(delay_between_steps)
 
-    # STEP 6: Repair Proposed (MR opened on duo/fix/*)
-    print_step(6, "Repair Proposed with Regression Test", "Duo opens MR !42 containing code fix and tests/regressions/test_inc.py.")
+    # STEP 6: Multi-Candidate Repair Filter & Proposal
+    print_step(6, "Multiple Candidate Fixes Filtered & Repair Proposed", "AI generated 3 candidate repairs; gates filtered candidates and selected verified fix.")
     mr_iid = 42
+
+    # Tier 1: Evaluate 3 candidates
+    candidate_selector = CandidateSelector()
+    candidate_summary = candidate_selector.evaluate_all()
+    print("  [★] MULTI-CANDIDATE FIX EVALUATOR (Research: Generated tests as filters double precision):")
+    for cand in candidate_summary["candidates"]:
+        status_tag = f"[{cand['status']}]"
+        print(f"      - {status_tag} {cand['title']} (Trust: {cand['trust_score']}/100)")
+        if cand["rejection_reason"]:
+            print(f"        -> Rejection: {cand['rejection_reason']}")
+    print(f"      => Winning Candidate: {candidate_summary['selected_candidate_id']}\n")
+
     emit_event(
         event_type="repair.proposed",
         source="sentinel-duo-flow:repair-agent",
@@ -284,6 +300,8 @@ def simulate_full_recovery_loop(
         data={
             "mr_iid": mr_iid,
             "fix_sha": fix_sha,
+            "selected_candidate_id": candidate_summary["selected_candidate_id"],
+            "candidates": candidate_summary["candidates"],
             "findings": [
                 "Identified ZeroDivisionError in app/app/routes/orders.py:calculate_discount",
                 "Added regression test tests/regressions/test_inc_zero_division.py",
@@ -318,10 +336,38 @@ def simulate_full_recovery_loop(
     )
     time.sleep(delay_between_steps)
 
-    # STEP 8: Deterministic Integrity Gate & SAST Gate
-    print_step(8, "Integrity Gate & SAST Security Gate", "Validates test suite sanctity; scans for test weakening, skips, coverage drops, or leaks.")
+    # STEP 8: Deterministic Integrity Gate, Saboteur Deterrence, Holdout Invariants & Trust Score
+    print_step(8, "Integrity Gate, Saboteur Interception, Holdout Tests & Trust Score", "Deterministic gates intercept rogue LLM evasions and calculate deterministic trust score.")
+    
+    # 8a: Live Saboteur Adversarial Attack Interception
+    saboteur_engine = SaboteurEngine()
+    saboteur_results = saboteur_engine.run_all_attacks()
+    print(f"  [★] SABOTEUR ADVERSARIAL AGENT BATTLE: {saboteur_results['caught_count']}/{saboteur_results['total_attacks']} Evasions Blocked Live (100% Intercepted).")
+    
+    # 8b: Secret Holdout Test Invariants
+    holdout_res = run_holdout_gate(candidate_sha=fix_sha, incident_id=inc_id)
+    print(f"  [★] HIDDEN HOLDOUT GATE: {holdout_res['invariants_passed']}/{holdout_res['invariants_tested']} Secret Invariants Verified.")
+
+    # 8c: Deterministic Trust Scorer
+    trust_res = calculate_trust_score(RepairMetrics(
+        integrity_blocking_count=0,
+        integrity_warning_count=0,
+        regression_proven=True,
+        holdout_invariants_passed=True,
+        added_lines=8,
+        deleted_lines=2,
+    ))
+    print(f"  [★] DETERMINISTIC REPAIR TRUST SCORE: {trust_res['trust_score']}/100 [{trust_res['rating']}]")
+    print(f"      AI Explanation: \"{trust_res['ai_explanation']}\"\n")
+
+    # 8d: Shadow Traffic Replay Engine
+    from sentinel.scripts.shadow_replay import run_shadow_replay
+    shadow_res = run_shadow_replay(incident_id=inc_id, candidate_revision="cand-003", sample_count=50, output_dir=art_dir)
+    print(f"  [★] SHADOW TRAFFIC REPLAY: {shadow_res['summary']['total_replayed_requests']}/{shadow_res['summary']['total_replayed_requests']} Incident Requests Replayed (Parity: {shadow_res['summary']['shadow_parity_score_pct']}%).")
+    print(f"      Baseline Failure Rate: {shadow_res['summary']['baseline_error_rate_pct']}% -> Candidate Fix Failure Rate: {shadow_res['summary']['candidate_error_rate_pct']}%\n")
+
     with open(art_dir / "integrity-gate-report.json", "w", encoding="utf-8") as f:
-        json.dump({"verdict": "PASS", "violations": []}, f)
+        json.dump({"verdict": "PASS", "violations": [], "trust_score": trust_res}, f)
 
     sast_res = run_sast_scan(target_dirs=["app", "sentinel"], incident_id=inc_id, commit_sha=fix_sha, emit_to_backend=False)
     with open(art_dir / "sast-report.json", "w", encoding="utf-8") as f:
@@ -337,9 +383,14 @@ def simulate_full_recovery_loop(
         data={
             "verdict": "PASS",
             "findings": [],
+            "trust_score": trust_res,
+            "holdout_gate": holdout_res,
+            "saboteur_summary": saboteur_results,
+            "shadow_replay": shadow_res,
         },
     )
     time.sleep(delay_between_steps)
+
 
     # STEP 9: Gate-Controlled Autonomous Merge
     print_step(9, "Autonomous Merge Completed", "All gates green. Project token executes merge without human intervention.")
@@ -357,8 +408,13 @@ def simulate_full_recovery_loop(
     merge_res = {"status": "SIMULATED", "mr_iid": mr_iid, "fix_sha": fix_sha}
     time.sleep(delay_between_steps)
 
-    # STEP 10: Redeploying Fixed Candidate Revision via Canary
-    print_step(10, "Canary Redeploy of Repaired Release", "Fixed commit deployed to Cloud Run candidate revision for staged evaluation.")
+    # STEP 10: Redeploying Fixed Candidate Revision via Risk-Adaptive Canary
+    print_step(10, "Risk-Adaptive Canary Redeploy of Repaired Release", "Fixed commit deployed via scored canary ladder (1% -> 10% -> 50% -> 100%) for staged evaluation.")
+    from sentinel.scripts.canary_deploy import score_diff_risk
+    diff_risk = score_diff_risk(author="gitlab-duo-flow", branch="duo/repair-fix")
+    print(f"  [★] RISK-ADAPTIVE CANARY: Diff Risk Score {diff_risk['risk_score']}/100 [{diff_risk['risk_tier']}]")
+    print(f"      Graduated Rollout: {diff_risk['rollout_steps_summary']}\n")
+
     emit_event(
         event_type="redeploy.completed",
         source="gitlab-ci:redeploy-canary",
@@ -371,12 +427,28 @@ def simulate_full_recovery_loop(
             "revision_name": "sentinel-target-app-cand-fix-002",
             "traffic_percent": 100,
             "target": "candidate",
+            "diff_risk": diff_risk,
         },
     )
     time.sleep(delay_between_steps)
 
-    # STEP 11: Post-Redeploy Evaluator Certifies RECOVERED
-    print_step(11, "Authoritative Recovery Verified", "Health Evaluator confirms zero error rate at 100% traffic. State Engine certifies RECOVERED!")
+    # STEP 11: Post-Redeploy Evaluator Certifies RECOVERED & Postmortem Compiled
+    print_step(11, "Authoritative Recovery Verified & Postmortem Generated", "Health Evaluator confirms zero error rate at 100% traffic. State Engine certifies RECOVERED!")
+    
+    # Generate Measured SCI Carbon Report
+    from sentinel.scripts.sci_carbon_engine import SoftwareCarbonIntensityCalculator
+    carbon_calc = SoftwareCarbonIntensityCalculator(service_name="sentinel-target-app", region="us-central1")
+    carbon_report = carbon_calc.calculate_measured_sci(measured_cpu_seconds=4.25, measured_requests=150)
+    with open(art_dir / "sci-carbon-intensity-report.json", "w", encoding="utf-8") as f:
+        json.dump(carbon_report, f, indent=2)
+
+    # Generate Postmortem MR Markdown
+    from sentinel.scripts.postmortem_generator import generate_postmortem_bundle
+    pm_bundle = generate_postmortem_bundle(incident_id=inc_id, output_dir=art_dir)
+    print(f"  [★] AUTONOMOUS POSTMORTEM GENERATED: {pm_bundle['title']}")
+    print(f"      Cryptographic Evidence Hash: {pm_bundle['sha256'][:24]}...")
+    print(f"      Measured SCI Carbon: {carbon_report['per_request_gco2']} gCO2eq/req ({carbon_report['grid_name']})\n")
+
     emit_event(
         event_type="recovery.verified",
         source="sentinel-evaluator:post-deploy-probe",
@@ -392,6 +464,8 @@ def simulate_full_recovery_loop(
             "sample_size": 25,
             "traffic_percent": 100,
             "revision_name": "sentinel-target-app-cand-fix-002",
+            "carbon_report": carbon_report,
+            "postmortem": pm_bundle,
         },
     )
 

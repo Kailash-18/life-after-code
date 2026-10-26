@@ -17,7 +17,7 @@ export const RULES = [
   { id: 'RULE_09', name: 'No always-true __eq__', what: 'Overriding __eq__ to return True so every comparison passes.', ex: '+ def __eq__(self, o): return True' },
 ] as const;
 
-export const GATE_NAME: Record<string, string> = { integrity: 'Integrity Gate', sast: 'Static analysis', sonar: 'Sonar quality gate', terraform: 'Terraform validate' };
+export const GATE_NAME: Record<string, string> = { integrity: 'Integrity Gate', holdout: 'Hidden holdout gate', sast: 'Static analysis', sonar: 'Sonar quality gate', terraform: 'Terraform validate' };
 
 export function gateWord(g?: GateResult): [Tone, string] {
   if (!g) return ['mute', 'pending'];
@@ -93,6 +93,7 @@ export function Proof({ attempt }: { attempt?: RecoveryAttempt }) {
   const tiles: { name: string; v: [Tone, string]; note: string; link?: string }[] = [
     { name: 'Regression proof', v: reg, note: p.reason },
     { name: 'Integrity Gate', v: gateWord(integrity), note: findingText(integrity?.findings[0]) ?? (integrity ? 'No blocking findings.' : 'No result recorded yet.'), link: integrity?.report_ref },
+    ...(attempt?.holdout_gate ? [{ name: 'Hidden holdout gate', v: (attempt.holdout_gate.verdict === 'PASS' ? ['ok', 'verified'] : ['bad', 'violated']) as [Tone, string], note: `${attempt.holdout_gate.invariants_passed}/${attempt.holdout_gate.invariants_tested} secret invariants held in the gate container.` }] : []),
     { name: 'Full test suite', v: testWord(p.suite), note: p.suite ? `On ${p.suite.sha}` : 'No result recorded yet.', link: p.suite?.junit_ref },
     ...gates.filter((g) => g.gate !== 'integrity').map((g) => ({ name: GATE_NAME[g.gate] ?? g.gate, v: gateWord(g), note: findingText(g.findings[0]) ?? 'No blocking findings.', link: g.report_ref })),
   ];
@@ -135,6 +136,41 @@ export function Outcome({ status, attempt, verified }: { status: string | null; 
         {state === 'pending' && 'Recovery is confirmed only when the evaluator checks the redeployed release at full traffic. Never by the AI, never by this page.'}
         {state === 'none' && 'No incident recorded.'}
       </p>
+    </div>
+  );
+}
+
+/** Candidate fixes and the deterministic trust score, when the attempt carries them. */
+export function Candidates({ attempt }: { attempt?: RecoveryAttempt }) {
+  const t = attempt?.trust_score, c = attempt?.candidates ?? [];
+  if (!t && !c.length) return <Empty title="No candidate fixes or trust score recorded for this attempt." />;
+  return (
+    <div className="stack">
+      {t && (
+        <div className="card">
+          <div className="verdict"><h3>Trust score {t.trust_score} / {t.max_score}</h3><Badge tone={t.trust_score >= 70 ? 'ok' : t.trust_score >= 40 ? 'warn' : 'bad'}>{t.rating}</Badge></div>
+          <p className="small" style={{ color: 'var(--ink-2)' }}>{t.recommendation}</p>
+          <ul className="ai-list" style={{ marginTop: 10 }}>
+            {[...t.deductions.map((d) => ({ ...d, s: '−' })), ...t.bonuses.map((b) => ({ ...b, s: '+' }))].map((x, i) => <li key={i}><b style={{ fontWeight: 500 }}>{x.s}{Math.abs(x.points)} {x.factor}</b><span className="ref" style={{ fontFamily: 'var(--sans)' }}>{x.reason}</span></li>)}
+          </ul>
+          <p className="small muted" style={{ marginTop: 8 }}>{t.governance_rule}</p>
+        </div>
+      )}
+      {c.length > 0 && (
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Candidate</th><th>Status</th><th className="num">Trust</th><th>Gates</th></tr></thead>
+            <tbody>{c.map((x) => (
+              <tr key={x.candidate_id}>
+                <td>{x.title}<span className="sub">{x.approach}</span></td>
+                <td><Badge tone={x.status === 'SELECTED' ? 'ok' : 'bad'}>{x.status.toLowerCase()}</Badge>{x.rejection_reason && <span className="sub">{x.rejection_reason}</span>}</td>
+                <td className="num">{x.trust_score}</td>
+                <td className="small mono">integrity {x.gate_results.integrity_gate} · holdout {x.gate_results.holdout_gate} · proof {x.gate_results.regression_proof}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

@@ -4,7 +4,7 @@ import { GITLAB_URL } from '../api/client';
 import { useIncident, useSentinel } from '../api/source';
 import { accepted, viewIncident } from '../state/derive';
 import { useMission } from '../state/mission';
-import { Analysis, Outcome, Proof, RULES, StageList } from '../ui/blocks';
+import { Analysis, Candidates, Outcome, Proof, RULES, StageList } from '../ui/blocks';
 import { Badge, Empty, EventList, PageHead, Section, Sha, Track, ago, dateTime, dur, statusTone, statusWord } from '../ui/kit';
 
 export default function IncidentRoom() {
@@ -112,6 +112,10 @@ export default function IncidentRoom() {
             ))}
           </div>
         )}
+      </Section>
+
+      <Section title="Candidates and trust score" note="Deterministic score from gate results; the AI can explain it but never set it.">
+        <Candidates attempt={att} />
       </Section>
 
       <Section title="Outcome">

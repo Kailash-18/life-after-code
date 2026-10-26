@@ -46,6 +46,59 @@ export interface Analysis {
   file_ref?: string;
 }
 
+export interface CandidateFixView {
+  candidate_id: string;
+  title: string;
+  author_model: string;
+  approach: string;
+  status: 'SELECTED' | 'REJECTED';
+  rejection_reason?: string | null;
+  trust_score: number;
+  target_files: string[];
+  diff_patch: string;
+  gate_results: {
+    integrity_gate: string;
+    holdout_gate: string;
+    regression_proof: string;
+    blocking_findings?: GateFinding[];
+  };
+}
+
+export interface TrustScoreView {
+  trust_score: number;
+  max_score: number;
+  rating: string;
+  recommendation: string;
+  deductions: { factor: string; points: number; reason: string }[];
+  bonuses: { factor: string; points: number; reason: string }[];
+  ai_explanation: string;
+  governance_rule: string;
+}
+
+export interface HoldoutGateView {
+  gate: string;
+  verdict: string;
+  elapsed_ms: number;
+  invariants_tested: number;
+  invariants_passed: number;
+  invariants: { invariant_id: string; name: string; status: string; confidential: boolean }[];
+  security_note: string;
+}
+
+export interface SaboteurAttackResult {
+  strategy_id: string;
+  name: string;
+  description: string;
+  target_file: string;
+  intended_evasion: string;
+  gate_verdict: string;
+  blocked: boolean;
+  blocking_findings_count: number;
+  findings: GateFinding[];
+  diff_patch: string;
+  live_status: string;
+}
+
 export interface RecoveryAttempt {
   id: string;
   attempt_no: number;
@@ -58,9 +111,13 @@ export interface RecoveryAttempt {
   analysis?: Analysis;
   test_results: TestResult[];
   gate_results: GateResult[];
+  trust_score?: TrustScoreView;
+  candidates?: CandidateFixView[];
+  holdout_gate?: HoldoutGateView;
 }
 
 export interface IncidentDetail extends Incident { recovery_attempts: RecoveryAttempt[] }
+
 
 /** One recorded event. `data` carries the measured values from event.schema.json (error_rate, p95_ms, traffic_percent, verdict, …). */
 export interface TimelineEvent {
@@ -219,6 +276,102 @@ export interface AdaptiveDriftStatus {
   action: string;
   data_source?: DataSource;
 }
+
+export interface DiffRiskReport {
+  recommended_strategy: string;
+  diff_risk: {
+    risk_score: number;
+    max_risk: number;
+    risk_tier: string;
+    is_ai_authored: boolean;
+    risk_factors: { factor: string; points: number; details: string }[];
+    adaptive_rollout_steps: { traffic_percent: number; wait_seconds: number; evaluator_required: boolean; description: string }[];
+    rollout_steps_summary: string;
+    rationale: string;
+  };
+  rationale: string;
+  strategies: Record<string, {
+    name: string;
+    recommended: boolean;
+    blast_radius: string;
+    rollback_speed_seconds: number;
+    zero_downtime: boolean;
+    cost_overhead: string;
+    description: string;
+    rollout_steps?: string;
+  }>;
+}
+
+export interface ShadowReplayReport {
+  specification: string;
+  incident_id: string;
+  candidate_revision: string;
+  timestamp: string;
+  elapsed_ms: number;
+  verdict: 'PASS' | 'FAIL';
+  summary: {
+    total_replayed_requests: number;
+    baseline_failures: number;
+    baseline_error_rate_pct: number;
+    candidate_failures: number;
+    candidate_error_rate_pct: number;
+    error_reduction_delta_pct: number;
+    shadow_parity_score_pct: number;
+  };
+  replayed_samples: {
+    request_id: string;
+    path: string;
+    method: string;
+    trigger_cause: string;
+    baseline_status: number;
+    candidate_status: number;
+    mitigated: boolean;
+  }[];
+  conclusion: string;
+}
+
+export interface MeasuredCarbonReport {
+  specification: string;
+  service_name: string;
+  region: string;
+  grid_name: string;
+  carbon_free_energy_pct: number;
+  sci_score: number;
+  sci_unit: string;
+  per_request_gco2: number;
+  sci_ceiling_target: number;
+  measurement_mode: string;
+  is_measured: boolean;
+  telemetry_source: string;
+  verdict: string;
+  measured_telemetry?: {
+    cpu_seconds: number;
+    memory_mb_seconds: number;
+    request_count: number;
+    network_bytes: number;
+  };
+  components: {
+    energy_consumed_kwh_E: number;
+    grid_marginal_intensity_I: number;
+    operational_emissions_gco2: number;
+    embodied_emissions_gco2_M: number;
+    total_emissions_gco2: number;
+    functional_units_R: number;
+  };
+  recommendations: string[];
+}
+
+export interface PostmortemBundle {
+  incident_id: string;
+  title: string;
+  generated_at: string;
+  sha256: string;
+  format: string;
+  markdown: string;
+  mr_title: string;
+  mr_labels: string[];
+}
+
 
 
 
