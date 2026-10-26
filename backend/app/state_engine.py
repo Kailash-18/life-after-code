@@ -41,6 +41,7 @@ from app.models.entities import (
     TestResult,
 )
 from app.persistence.factory import get_repository
+from app.release_tracker import release_id_for
 
 VALID_LIFECYCLE_STATES = [
     "DETECTED",
@@ -185,7 +186,7 @@ def _new_incident(incident_id: str, event: dict[str, Any], data: dict[str, Any])
     breached = data.get("breached_thresholds") or []
     return Incident(
         id=incident_id,
-        release_id=event.get("release_id") or f"rel-{event.get('commit_sha', 'unknown')[:12]}",
+        release_id=release_id_for(event) or "rel-unknown",
         status=IncidentStatus.DETECTED,
         detected_at=_now().isoformat(),
         breached_thresholds=[str(b) for b in breached],

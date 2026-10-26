@@ -45,7 +45,7 @@ the idempotency key is released so CI can resend after `incident.detected` arriv
 
 Release-level events (`pipeline.started`, `deploy.canary_started`, `evaluator.verdict`, ...)
 without an `incident_id` update releases, deployments and health samples, which is what `/status` shows.
-`release_id` defaults to `rel-<first 12 chars of commit_sha>` when CI does not send one.
+A release is a commit: the backend always uses `rel-<first 12 chars of commit_sha>` as the release id and ignores a CI-sent `release_id` when `commit_sha` is present (`canary_deploy.py` sends the placeholder `rel-candidate-001` for every release).
 
 ## Incident correlation (CI jobs do not need to know the incident id)
 

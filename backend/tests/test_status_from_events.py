@@ -84,3 +84,32 @@ def test_one_job_can_step_traffic(client, hmac_secret):
     again = ok(send(client, hmac_secret, "deploy.canary_started", commit_sha=FIX_SHA, job_id=4100,
                     data={"traffic_percent": 50}))
     assert "Duplicate" in again["note"]
+
+
+def test_placeholder_release_id_does_not_split_the_release(client, hmac_secret):
+    """canary_deploy.py sends release_id=rel-candidate-001 for every release; the evaluator sends none.
+    Both must land on the same release (the commit), and /status must settle after 100 %."""
+    for pct in (10, 50, 100):
+        ok(send(client, hmac_secret, "deploy.canary_started", commit_sha=FIX_SHA, release_id="rel-candidate-001",
+                data={"traffic_percent": pct, "revision_name": "target-app-00009"}))
+        ok(send(client, hmac_secret, "evaluator.verdict", commit_sha=FIX_SHA, source=EVALUATOR,
+                data={"verdict": "PASS", "target": "candidate", "traffic_percent": pct,
+                      "error_rate": 0.0, "p95_ms": 9.0, "sample_size": 100}))
+    releases = client.get("/api/v1/releases").json()
+    assert [r["id"] for r in releases] == [f"rel-{FIX_SHA[:12]}"]
+    status = client.get("/api/v1/status").json()
+    assert status["current_release"]["revision_name"] == "target-app-00009"
+    assert status["candidate_release"] is None
+    assert status["traffic_split"] == {"stable_percent": 100, "candidate_percent": 0}
+
+    # Next faulty release with the same placeholder: it is a separate release, rolled back.
+    ok(send(client, hmac_secret, "deploy.canary_started", commit_sha=BROKEN_SHA, release_id="rel-candidate-001",
+            data={"traffic_percent": 10}))
+    assert client.get("/api/v1/status").json()["traffic_split"] == {"stable_percent": 90, "candidate_percent": 10}
+    ok(send(client, hmac_secret, "evaluator.verdict", commit_sha=BROKEN_SHA, source=EVALUATOR,
+            data={"verdict": "FAIL", "target": "candidate", "traffic_percent": 10, "error_rate": 0.2,
+                  "p95_ms": 9.0, "sample_size": 100, "breached_thresholds": ["error_rate"]}))
+    ok(send(client, hmac_secret, "rollback.completed", commit_sha=BROKEN_SHA, data={"post_rollback_probe_ok": True}))
+    status = client.get("/api/v1/status").json()
+    assert status["current_release"]["commit_sha"] == FIX_SHA
+    assert status["traffic_split"] == {"stable_percent": 100, "candidate_percent": 0}

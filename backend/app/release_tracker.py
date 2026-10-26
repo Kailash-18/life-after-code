@@ -32,10 +32,16 @@ RELEASE_EVENT_TYPES = {
 
 
 def release_id_for(event: dict[str, Any]) -> str | None:
-    if event.get("release_id"):
-        return event["release_id"]
-    sha = event.get("commit_sha")
-    return f"rel-{sha[:12]}" if sha else None
+    """A release is a commit: rel-<first 12 chars of commit_sha>.
+
+    CI's own release_id is not trusted as identity: canary_deploy.py sends the same
+    placeholder (rel-candidate-001) for every release while the evaluator sends none, which
+    split one release into two records and left /status showing a stuck 100 % candidate.
+    """
+    sha = str(event.get("commit_sha") or "").strip().lower()
+    if sha:
+        return f"rel-{sha[:12]}"
+    return event.get("release_id")
 
 
 def _stage_for(traffic_percent: int) -> DeploymentStage:
