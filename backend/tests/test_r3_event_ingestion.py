@@ -389,3 +389,17 @@ def test_gitlab_webhook_duplicate_acknowledged_idempotently(client):
     )
     assert res2.status_code == 200
     assert "Duplicate webhook event acknowledged" in res2.json().get("note", "")
+
+
+def test_list_events_global_ledger(client, hmac_secret):
+    payload = _valid_payload(job_id="999123", event_type="incident.detected", incident_id="inc-ledger-test")
+    post_res = _make_signed_request(client, payload, hmac_secret)
+    assert post_res.status_code == 202
+
+    list_res = client.get("/api/v1/events?limit=50")
+    assert list_res.status_code == 200
+    events = list_res.json()
+    assert isinstance(events, list)
+    matching = [e for e in events if e.get("incident_id") == "inc-ledger-test"]
+    assert len(matching) >= 1
+    assert matching[0]["type"] == "incident.detected"

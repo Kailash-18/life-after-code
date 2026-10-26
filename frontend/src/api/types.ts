@@ -197,5 +197,18 @@ export interface S3StorageStatus {
   health: string;
 }
 
+export interface AdaptiveDriftStatus {
+  timestamp: string;
+  observed_value: number;
+  current_ewma: number;
+  cusum_high_statistic: number;
+  cusum_low_statistic: number;
+  decision_threshold_h: number;
+  drift_detected: boolean;
+  status: string;
+  action: string;
+}
+
+
 
 

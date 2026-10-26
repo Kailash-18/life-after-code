@@ -330,6 +330,37 @@ async def ingest_ci_event(
     }
 
 
+@router.get("", response_model=list[dict[str, Any]])
+async def list_events(
+    limit: int = 100,
+    offset: int = 0,
+    type: str | None = None,
+    incident_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """Fetch global chronological event ledger for Mission Control and audit logging."""
+    repo = get_repository()
+    events = repo.list_all_events(limit=limit, offset=offset, event_type=type, incident_id=incident_id)
+    return [
+        {
+            "id": e.id,
+            "type": e.type,
+            "source": e.source,
+            "source_job_id": e.source_job_id,
+            "job": str(e.source_job_id) if e.source_job_id is not None else None,
+            "pipeline_id": str(e.data.get("pipeline_id")) if e.data.get("pipeline_id") else None,
+            "commit_sha": e.data.get("commit_sha"),
+            "release_id": e.data.get("release_id"),
+            "incident_id": e.entity_id if e.entity_type == "incident" else e.data.get("incident_id"),
+            "at": e.at,
+            "summary": e.summary,
+            "evidence_url": e.artifact_url,
+            "data": e.data,
+            "rejected": e.data.get("rejected"),
+        }
+        for e in events
+    ]
+
+
 # Resolve the schema at import time in production so a bad image fails fast.
 if os.getenv("SENTINEL_ENV", "development").lower() == "production":
     get_contract_validator()

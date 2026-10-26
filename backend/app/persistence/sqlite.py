@@ -7,6 +7,7 @@ Requires zero external database packages, avoiding unapproved database lock-in.
 import json
 import sqlite3
 import threading
+from typing import Any
 
 from app.models.entities import (
     Analysis,
@@ -737,6 +738,43 @@ class SqliteSentinelRepository(SentinelRepository):
                 """,
                 (incident_id, incident_id),
             ).fetchall()
+
+            return [
+                EventRecord(
+                    id=r["id"],
+                    entity_type=r["entity_type"],
+                    entity_id=r["entity_id"],
+                    type=r["type"],
+                    source=r["source"],
+                    source_job_id=r["source_job_id"],
+                    at=r["at"],
+                    payload_ref=r["payload_ref"],
+                    data=json.loads(r["data"]),
+                    artifact_url=r["artifact_url"],
+                    summary=r["summary"],
+                )
+                for r in rows
+            ]
+
+    def list_all_events(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        event_type: str | None = None,
+        incident_id: str | None = None,
+    ) -> list[EventRecord]:
+        with self._lock, self._get_connection() as conn:
+            query = "SELECT * FROM events WHERE 1=1"
+            params: list[Any] = []
+            if event_type:
+                query += " AND type = ?"
+                params.append(event_type)
+            if incident_id:
+                query += " AND (entity_id = ? OR json_extract(data, '$.incident_id') = ?)"
+                params.extend([incident_id, incident_id])
+            query += " ORDER BY at ASC LIMIT ? OFFSET ?"
+            params.extend([max(1, min(limit, 500)), max(0, offset)])
+            rows = conn.execute(query, params).fetchall()
 
             return [
                 EventRecord(

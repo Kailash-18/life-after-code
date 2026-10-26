@@ -1,4 +1,10 @@
+import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -10,6 +16,7 @@ from app.routes.events import router as events_router
 from app.routes.health import router as health_router
 from app.routes.incidents import router as incidents_router
 from app.routes.releases import router as releases_router
+from app.routes.sre import router as sre_router
 from app.routes.state import router as state_router
 from app.routes.status import router as status_router
 from app.routes.webhooks import router as webhooks_router
@@ -35,8 +42,8 @@ app.add_middleware(
     allow_origins=settings.cors_origins,
     # The dashboard only reads. Browsers may not POST: writes come from CI (HMAC) only.
     allow_credentials=False,
-    allow_methods=["GET"],
-    allow_headers=["Content-Type"],
+    allow_methods=["GET", "OPTIONS", "HEAD"],
+    allow_headers=["Content-Type", "Accept", "Authorization", "X-Requested-With"],
 )
 
 
@@ -78,6 +85,7 @@ app.include_router(status_router)
 app.include_router(incidents_router)
 app.include_router(releases_router)
 app.include_router(state_router)
+app.include_router(sre_router)
 
 
 
