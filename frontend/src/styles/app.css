@@ -729,3 +729,37 @@ button.stat:hover { border-color: var(--line-2); }
 .ledger li.is-refused > div { opacity: 0.75; }
 .tag-refused { font: 700 9px/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--amber); border: 1px dashed var(--amber); padding: 4px 7px; border-radius: 999px; }
 .ledger__refused { color: var(--amber); font-size: 14px; }
+
+/* SRE Telemetry & Observability Center */
+.sre-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+  margin-top: 16px;
+  margin-bottom: 24px;
+}
+.sre-metric-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.88rem;
+}
+.sre-metric-row:last-child {
+  border-bottom: none;
+}
+.sre-bar-track {
+  width: 100%;
+  height: 6px;
+  background: var(--line);
+  border-radius: 999px;
+  overflow: hidden;
+  margin-top: 4px;
+}
+.sre-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.4s ease;
+}
+

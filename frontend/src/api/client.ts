@@ -1,4 +1,5 @@
 import type {
+  AdaptiveDriftStatus,
   DisasterRecoveryStatus,
   EBPFTelemetryReport,
   OPAComplianceReport,
@@ -42,12 +43,11 @@ export async function getJSON(path: string, signal?: AbortSignal): Promise<unkno
 }
 
 // ==============================================================================
-// Optional SRE telemetry readers. They return exactly what the backend says and
-// throw when it does not answer — no stand-in values. (The backend does not serve
-// /api/v1/sre/* yet.)
+// Authoritative SRE telemetry readers backed by /api/v1/sre/* and /api/v1/state/*
 // ==============================================================================
 export const getSRECompositeHealth = (signal?: AbortSignal) => getJSON('/api/v1/sre/health', signal) as Promise<SRECompositeHealth>;
 export const getOPACompliance = (signal?: AbortSignal) => getJSON('/api/v1/sre/opa', signal) as Promise<OPAComplianceReport>;
 export const getEBPFTelemetry = (signal?: AbortSignal) => getJSON('/api/v1/sre/ebpf', signal) as Promise<EBPFTelemetryReport>;
 export const getDisasterRecoveryStatus = (signal?: AbortSignal) => getJSON('/api/v1/sre/dr', signal) as Promise<DisasterRecoveryStatus>;
+export const getAdaptiveDriftStatus = (signal?: AbortSignal) => getJSON('/api/v1/sre/drift', signal) as Promise<AdaptiveDriftStatus>;
 export const getS3StorageStatus = (signal?: AbortSignal) => getJSON('/api/v1/state/storage', signal) as Promise<S3StorageStatus>;

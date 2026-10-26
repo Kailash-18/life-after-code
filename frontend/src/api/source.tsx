@@ -133,6 +133,12 @@ export function SentinelProvider({ children }: { children: ReactNode }) {
     };
     const pollHealthz = async () => {
       try { const h = toHealthz(await hit('healthz', '/api/v1/healthz')); if (alive) setSnap((s) => ({ ...s, healthz: h })); } catch { /* recorded in endpoints */ }
+      try { await hit('storage', '/api/v1/state/storage'); } catch { /* recorded in endpoints */ }
+      try { await hit('sre_health', '/api/v1/sre/health'); } catch { /* recorded in endpoints */ }
+      try { await hit('sre_opa', '/api/v1/sre/opa'); } catch { /* recorded in endpoints */ }
+      try { await hit('sre_ebpf', '/api/v1/sre/ebpf'); } catch { /* recorded in endpoints */ }
+      try { await hit('sre_dr', '/api/v1/sre/dr'); } catch { /* recorded in endpoints */ }
+      try { await hit('sre_drift', '/api/v1/sre/drift'); } catch { /* recorded in endpoints */ }
     };
     const fetchIncident = async (id: string) => {
       const [d, tl] = await Promise.all([
