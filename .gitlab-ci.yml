@@ -19,7 +19,8 @@ variables:
   PYTHONUNBUFFERED: "1"
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
   SENTINEL_BACKEND_URL: "http://sentinel-backend:8000"
-  SENTINEL_HMAC_SECRET: "hackathon-transcend-sentinel-key-2026"
+  # Defaults only: project-level CI/CD variables override these. SENTINEL_HMAC_SECRET is deliberately
+  # NOT set here (this repo is public): define it as a protected + masked project variable.
   GCP_PROJECT_ID: "project-sentinel-hackathon"
   GCP_REGION: "us-central1"
   GCP_FAILOVER_REGION: "us-east1"
