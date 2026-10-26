@@ -45,9 +45,9 @@ report*.xml
 .env
 .env.*
 !.env.example
-.pytest_cache/
-.coverage
-htmlcov/
+*-key.json
+*sa-key*.json
+credentials.json
 
 # Frontend / Node
 node_modules/
