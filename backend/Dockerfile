@@ -9,7 +9,8 @@ ENV PYTHONUNBUFFERED=1 \
     SENTINEL_ENV=production \
     SENTINEL_EVENT_SCHEMA_PATH=/workspace/contracts/event.schema.json \
     SENTINEL_SQLITE_PATH=/tmp/sentinel.db \
-    SENTINEL_STATE_CACHE_DIR=/tmp/sentinel-state
+    SENTINEL_STATE_CACHE_DIR=/tmp/sentinel-state \
+    PYTHONPATH=/workspace
 
 WORKDIR /workspace
 
@@ -17,6 +18,8 @@ COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend/app/ ./app/
+# The SRE routes import a few stdlib-only Sentinel scripts.
+COPY sentinel/scripts/ ./sentinel/scripts/
 COPY docs/contracts/event.schema.json docs/contracts/analysis.schema.json ./contracts/
 
 RUN useradd --create-home --uid 10001 sentinel
