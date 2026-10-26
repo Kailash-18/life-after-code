@@ -89,7 +89,7 @@ export function SentinelProvider({ children }: { children: ReactNode }) {
       if (h && t - lastPush > 900) { lastPush = t; push({ t, err: h.error_rate, p95: h.p95_ms, healthy: h.healthy }); }
     };
     tick();
-    const id = setInterval(tick, 250);
+    const id = setInterval(tick, 1000);
     return () => clearInterval(id);
   }, [source, demo, push]);
 

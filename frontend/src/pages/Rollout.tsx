@@ -2,48 +2,49 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useSentinel } from '../api/source';
 import type { Release, TimelineEvent } from '../api/types';
-import { MODE_COLOR, accepted } from '../state/derive';
+import { accepted } from '../state/derive';
 import { useMission } from '../state/mission';
-import { Tilt } from '../ui/fx';
-import { Chip, EventData, PageHead, Ring, SecHead, Sha, ago, dateTime, dur, ms, num, pct, time } from '../ui/kit';
+import { Badge, Empty, Metric, PageHead, Readouts, Section, Sha, ago, dateTime, dur, ms, num, pct, time, type Tone } from '../ui/kit';
 
 const verdictOf = (e: TimelineEvent) => (typeof e.data?.verdict === 'string' ? e.data.verdict : undefined);
+const relTone = (s: string): Tone => (s === 'ROLLED_BACK' ? 'bad' : s === 'STABLE' || s === 'PROMOTED' ? 'ok' : s === 'CANARY' ? 'warn' : 'mute');
 
 function Ladder({ rel, events }: { rel: Release; events: TimelineEvent[] }) {
-  const mine = events.filter((e) => e.release_id === rel.id && (e.type === 'deploy.canary_started' || e.type === 'evaluator.verdict' || e.type === 'recovery.verified' || e.type === 'redeploy.completed'));
+  const mine = events.filter((e) => e.release_id === rel.id && ['deploy.canary_started', 'evaluator.verdict', 'recovery.verified'].includes(e.type));
   const steps = mine.filter((e) => e.type === 'deploy.canary_started').map((c, i, all) => {
     const next = all[i + 1];
-    const within = mine.filter((e) => (e.type === 'evaluator.verdict' || e.type === 'recovery.verified') && Date.parse(e.at) >= Date.parse(c.at) && (!next || Date.parse(e.at) < Date.parse(next.at)));
+    const within = mine.filter((e) => e.type !== 'deploy.canary_started' && Date.parse(e.at) >= Date.parse(c.at) && (!next || Date.parse(e.at) < Date.parse(next.at)));
     const final = [...within].reverse().find((e) => verdictOf(e) !== 'IN_PROGRESS') ?? within[within.length - 1];
     return { c, pct: num(c.data?.traffic_percent), v: final };
   });
-  const rolledBack = rel.status === 'ROLLED_BACK';
-  if (!steps.length) return <p className="muted">No deploy or evaluator events recorded for {rel.version}. The ladder fills only from recorded <code>deploy.canary_started</code> and <code>evaluator.verdict</code> events.</p>;
+  if (!steps.length) return <Empty title={`No canary steps recorded for ${rel.version}.`}><span className="muted small">Steps appear from recorded deploy.canary_started and evaluator.verdict events.</span></Empty>;
   return (
-    <ol className="ladder">
-      {steps.map(({ c, pct: p, v }, i) => {
+    <div className="ladder">
+      {steps.map(({ c, pct: p, v }) => {
         const vv = v ? verdictOf(v) : undefined;
-        const tone = vv === 'PASS' ? 'pass' : vv === 'FAIL' ? 'fail' : 'pending';
         return (
-          <li key={c.id} className={`rung rung--${tone}`} data-reveal style={{ ['--i' as string]: i }}>
-            <Tilt className="card rung__card" max={10}>
-              <span className="rung__pct">{p ?? '?'}<small>%</small></span>
-              <span className="card__k">traffic on {rel.version}</span>
-              <span className={`stamp rung__stamp`}>{vv ?? 'NO VERDICT'}</span>
-              {v ? <EventData e={v} /> : <p className="muted small">The evaluator has not recorded a verdict for this step.</p>}
-              <p className="ledger__src"><time>{time(c.at)}</time><code>job {c.job}</code>{v?.evidence_url && <a href={v.evidence_url} target="_blank" rel="noreferrer">evaluator ↗</a>}</p>
-            </Tilt>
-          </li>
+          <div key={c.id} className={`card rung${vv === 'FAIL' ? ' rung--fail' : ''}`}>
+            <div className="verdict"><span className="pct">{p ?? '?'}<small>%</small></span><Badge tone={vv === 'PASS' ? 'ok' : vv === 'FAIL' ? 'bad' : 'mute'}>{vv ?? 'no verdict'}</Badge></div>
+            <div className="rung__bar"><span style={{ width: `${p ?? 0}%` }} /></div>
+            <span className="label">of traffic on {rel.version}</span>
+            {v ? <Readouts e={v} /> : <p className="small muted">No verdict recorded for this step.</p>}
+            <p className="small muted" style={{ marginTop: 8 }}>{time(c.at)}{c.job && ` · job ${c.job}`}</p>
+          </div>
         );
       })}
-      {rolledBack && <li className="rung rung--rollback" data-reveal><div className="card rung__card"><span className="rung__pct">0<small>%</small></span><span className="card__k">rolled back</span><span className="stamp rung__stamp">ROLLED BACK</span><p className="muted small">Traffic returned to the last known-good release.</p></div></li>}
-    </ol>
+      {rel.status === 'ROLLED_BACK' && (
+        <div className="card rung rung--fail">
+          <div className="verdict"><span className="pct">0<small>%</small></span><Badge tone="bad">rolled back</Badge></div>
+          <p className="small" style={{ color: 'var(--ink-2)' }}>Traffic returned to the last known-good release.</p>
+        </div>
+      )}
+    </div>
   );
 }
 
 export default function Rollout() {
   const { snap } = useSentinel();
-  const { d, now } = useMission();
+  const { now } = useMission();
   const st = snap.status;
   const releases = useMemo(() => snap.releases ?? [], [snap.releases]);
   const byId = useMemo(() => new Map(releases.map((r) => [r.id, r])), [releases]);
@@ -59,107 +60,98 @@ export default function Rollout() {
   const knownGood = [...releases].reverse().find((r) => r.known_good);
 
   return (
-    <div className="page">
-      <PageHead num="01" kicker="Rollout · releases & canary" title="Rollout"
-        aside={
-          <div className="rollout__gauges">
-            <Ring value={split?.candidate_percent ?? null} label={`${split?.candidate_percent ?? 0}%`} sub={st?.candidate_release ? `on candidate ${st.candidate_release.version}` : 'no candidate'} color={split && split.candidate_percent > 0 ? '#ffc23d' : MODE_COLOR[d.mode]} />
-            <div className="serving">
-              <span className="card__k">Serving</span>
-              <b className="serving__v">{st?.current_release?.version ?? '—'}</b>
-              <span className="muted small">{st?.current_release ? <>revision <code>{st.current_release.revision_name ?? 'not reported'}</code></> : 'The API reported no current release.'}</span>
-              <span className="muted small">Last known good: <b>{knownGood?.version ?? '—'}</b></span>
-            </div>
-          </div>
-        }>
-        <p>Every release that went to production, how much traffic it took, and what the health evaluator said at each step. Traffic moves only through the deploy jobs; this page reads, never steers.</p>
+    <>
+      <PageHead eyebrow="Releases" title="What went to production, and what the evaluator said">
+        Every release goes out as a canary: a small share of traffic first, checked by the health evaluator at each step. Traffic moves only through the deploy jobs; this page only reads.
       </PageHead>
 
-      <section className="sec sec--tight">
-        <SecHead num="A" title="Release line">Oldest on the left. Pick one to see its canary ladder.</SecHead>
+      <div className="grid g4">
+        <div className="card tilt"><Metric value={st?.current_release?.version ?? '—'} label="Serving" /></div>
+        <div className="card tilt"><Metric value={st?.candidate_release?.version ?? '—'} label="Candidate on trial" /></div>
+        <div className="card tilt"><Metric value={split ? `${split.candidate_percent}%` : '—'} label="Traffic on the candidate" /></div>
+        <div className="card tilt"><Metric value={knownGood?.version ?? '—'} label="Last known good" /></div>
+      </div>
+
+      <Section title="Releases" note="Newest first. Select one to see its canary steps.">
         {releases.length ? (
-          <ol className="relline" data-reveal>
-            {releases.map((r) => {
-              const serving = st?.current_release?.id === r.id, cand = st?.candidate_release?.id === r.id;
-              return (
-                <li key={r.id}>
-                  <button className={`relcard rel--${r.status.toLowerCase()}${sel?.id === r.id ? ' is-sel' : ''}`} onClick={() => setPick(r.id)} data-cursor="Inspect" aria-pressed={sel?.id === r.id}>
-                    <span className="relcard__flags">{serving && <Chip tone="ok" pulse>serving</Chip>}{cand && <Chip tone="warn" pulse>candidate</Chip>}{r.known_good && <Chip tone="live">known good</Chip>}</span>
-                    <b>{r.version}</b>
-                    <span className="relcard__status">{r.status.replace('_', ' ')}</span>
-                    <code>{r.commit_sha || 'no sha'}</code>
-                    <span className="muted small">{ago(r.created_at, now)}</span>
-                  </button>
-                </li>
-              );
-            })}
-          </ol>
-        ) : <p className="muted">The API has not returned any releases.</p>}
-      </section>
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>Version</th><th>Status</th><th>Commit</th><th>Revision</th><th>Pipeline</th><th className="num">Created</th></tr></thead>
+              <tbody>
+                {[...releases].reverse().map((r) => (
+                  <tr key={r.id} className={`is-link${sel?.id === r.id ? ' is-sel' : ''}`} onClick={() => setPick(r.id)}>
+                    <td><b style={{ fontWeight: 500 }}>{r.version}</b>
+                      <span className="sub">{st?.current_release?.id === r.id ? 'serving' : st?.candidate_release?.id === r.id ? 'candidate' : r.known_good ? 'known good' : ' '}</span></td>
+                    <td><Badge tone={relTone(r.status)}>{r.status.replace(/_/g, ' ').toLowerCase()}</Badge></td>
+                    <td className="mono small">{r.commit_sha ? r.commit_sha.slice(0, 12) : '—'}</td>
+                    <td className="mono small">{r.revision_name ?? '—'}</td>
+                    <td className="mono small">{r.pipeline_id ?? '—'}</td>
+                    <td className="num small">{ago(r.created_at, now)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <Empty title="The API has not returned any releases." />}
+      </Section>
 
       {sel && (
-        <section className="sec sec--tight">
-          <SecHead num="B" title={`Canary ladder · ${sel.version}`}>10% → 50% → 100%, each step gated by the evaluator. A failing step ends the ladder in a rollback.</SecHead>
-          <div className="relmeta" data-reveal>
+        <Section title={`Canary steps · ${sel.version}`} note="10% → 50% → 100%, each step checked by the evaluator. A failing step ends in a rollback.">
+          <div className="row" style={{ marginBottom: 14 }}>
             <Sha label="commit" value={sel.commit_sha || undefined} />
-            <Sha label="revision" value={sel.revision_name} />
             <Sha label="image" value={sel.image_digest} />
-            <span className="muted small">pipeline {sel.pipeline_id ?? '—'} · created {dateTime(sel.created_at)}</span>
+            <span className="small muted">created {dateTime(sel.created_at)}</span>
           </div>
           <Ladder rel={sel} events={evs} />
-        </section>
+        </Section>
       )}
 
-      <section className="sec sec--tight">
-        <SecHead num="C" title="Evaluator verdicts">Every recorded verdict, newest first. The evaluator owns health; these numbers are its own.</SecHead>
+      <Section title="Evaluator verdicts" note="Newest first. These are the evaluator's own measurements.">
         {verdicts.length ? (
-          <div className="tablewrap" data-reveal>
-            <table className="vtable">
-              <thead><tr><th>When</th><th>Release</th><th>Traffic</th><th>Verdict</th><th>Errors</th><th>p95</th><th>Samples</th><th>Breached</th><th>Job</th></tr></thead>
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>When</th><th>Release</th><th>Verdict</th><th className="num">Traffic</th><th className="num">Errors</th><th className="num">p95</th><th className="num">Samples</th><th>Breached</th></tr></thead>
               <tbody>
                 {verdicts.map((e) => {
                   const v = verdictOf(e) ?? '—';
                   const br = Array.isArray(e.data?.breached_thresholds) ? (e.data.breached_thresholds as string[]) : [];
                   const er = num(e.data?.error_rate), p = num(e.data?.p95_ms), n = num(e.data?.sample_size), tp = num(e.data?.traffic_percent);
                   return (
-                    <tr key={e.id} className={`v-${v.toLowerCase()}`}>
-                      <td>{dateTime(e.at)}</td>
+                    <tr key={e.id}>
+                      <td className="small">{dateTime(e.at)}<span className="sub">job {e.job ?? '—'}</span></td>
                       <td>{e.release_id ? byId.get(e.release_id)?.version ?? e.release_id : '—'}</td>
-                      <td>{tp !== undefined ? `${tp}%` : '—'}</td>
-                      <td><span className="vt">{e.type === 'recovery.verified' ? 'RECOVERY ✓' : v}</span></td>
-                      <td>{er !== undefined ? pct(er) : '—'}</td>
-                      <td>{p !== undefined ? ms(p) : '—'}</td>
-                      <td>{n ?? '—'}</td>
-                      <td>{br.length ? br.join('; ') : '—'}</td>
-                      <td><code>{e.job ?? '—'}</code></td>
+                      <td><Badge tone={v === 'PASS' ? 'ok' : v === 'FAIL' ? 'bad' : 'mute'}>{e.type === 'recovery.verified' ? 'recovered' : v.toLowerCase()}</Badge></td>
+                      <td className="num">{tp !== undefined ? `${tp}%` : '—'}</td>
+                      <td className="num">{er !== undefined ? pct(er) : '—'}</td>
+                      <td className="num">{p !== undefined ? ms(p) : '—'}</td>
+                      <td className="num">{n ?? '—'}</td>
+                      <td className="small" style={{ color: br.length ? 'var(--bad)' : undefined }}>{br.length ? br.join('; ') : '—'}</td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
           </div>
-        ) : <p className="muted">No evaluator verdicts recorded yet.</p>}
-      </section>
+        ) : <Empty title="No evaluator verdicts recorded yet." />}
+      </Section>
 
-      <section className="sec sec--tight">
-        <SecHead num="D" title="Rollbacks">Containment is a CI job plus a post-rollback probe. A rollback without a healthy probe is not containment.</SecHead>
+      <Section title="Rollbacks" note="Containment counts only when a probe confirms the old release is healthy again.">
         {rollbacks.length ? (
-          <div className="rbgrid">
-            {rollbacks.map(({ s, done }) => {
-              const to = s.release_id ? byId.get(s.release_id)?.version : undefined;
-              return (
-                <Tilt key={s.id} className={`card rb ${done ? 'is-done' : 'is-open'}`} max={10}>
-                  <span className="card__k">{dateTime(s.at)}</span>
-                  <p className="rb__to">→ {to ?? 'known good'}</p>
-                  <p>{s.summary}</p>
-                  {done ? <><EventData e={done} /><p className="muted small">probe after {dur(s.at, done.at)} · job {done.job}</p></> : <p className="rb__warn">No rollback.completed event recorded.</p>}
-                  {s.incident_id && <Link to={`/incidents/${encodeURIComponent(s.incident_id)}`} data-cursor="Room">{s.incident_id} →</Link>}
-                </Tilt>
-              );
-            })}
+          <div className="grid g2">
+            {rollbacks.map(({ s, done }) => (
+              <div key={s.id} className="card">
+                <div className="verdict">
+                  <h3>→ {s.release_id ? byId.get(s.release_id)?.version ?? 'known good' : 'known good'}</h3>
+                  <Badge tone={done ? 'ok' : 'warn'}>{done ? 'probe healthy' : 'no probe yet'}</Badge>
+                </div>
+                <p className="small" style={{ color: 'var(--ink-2)' }}>{s.summary}</p>
+                {done && <><Readouts e={done} /><p className="small muted" style={{ marginTop: 6 }}>confirmed {dur(s.at, done.at)} after it started</p></>}
+                {s.incident_id && <Link className="small" to={`/incidents/${encodeURIComponent(s.incident_id)}`}>{s.incident_id} →</Link>}
+              </div>
+            ))}
           </div>
-        ) : <p className="muted">No rollbacks recorded.</p>}
-      </section>
-    </div>
+        ) : <Empty title="No rollbacks recorded." />}
+      </Section>
+    </>
   );
 }

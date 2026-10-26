@@ -9,9 +9,5 @@ export default defineConfig({
     port: 5173,
     proxy: { '/api': { target: process.env.SENTINEL_API ?? 'http://localhost:8000', changeOrigin: true } },
   },
-  build: {
-    target: 'es2022',
-    chunkSizeWarningLimit: 1600,
-    rollupOptions: { output: { manualChunks: { three: ['three'], r3f: ['@react-three/fiber', '@react-three/drei', '@react-three/postprocessing', 'postprocessing'], motion: ['gsap'] } } },
-  },
+  build: { target: 'es2022' },
 });

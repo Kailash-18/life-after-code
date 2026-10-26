@@ -30,8 +30,10 @@ export async function getJSON(path: string, signal?: AbortSignal): Promise<unkno
   signal?.addEventListener('abort', () => ctrl.abort());
   try {
     const res = await fetch(`${API_BASE}${path}`, { signal: ctrl.signal, headers: { Accept: 'application/json' } });
-    if (!res.ok) throw new ApiError(res.status, `${res.status} ${res.statusText}`);
     const type = res.headers.get('content-type') ?? '';
+    // The dev proxy answers 5xx with an empty body when nothing listens on the backend port.
+    if (!res.ok && res.status >= 500 && !type.includes('json')) throw new ApiError(0, 'The backend is not running (nothing answered on its port)');
+    if (!res.ok) throw new ApiError(res.status, `${res.status} ${res.statusText}`);
     if (!type.includes('json')) throw new ApiError(502, 'The API did not answer with JSON');
     return await res.json();
   } catch (e) {
