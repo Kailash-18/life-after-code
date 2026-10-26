@@ -80,7 +80,7 @@ export default function Rollout() {
               <tbody>
                 {[...releases].reverse().map((r) => (
                   <tr key={r.id} className={`is-link${sel?.id === r.id ? ' is-sel' : ''}`} onClick={() => setPick(r.id)}>
-                    <td><b style={{ fontWeight: 500 }}>{r.version}</b>
+                    <td><button type="button" className="relpick" aria-pressed={sel?.id === r.id} onClick={(e) => { e.stopPropagation(); setPick(r.id); }}>{r.version}</button>
                       <span className="sub">{st?.current_release?.id === r.id ? 'serving' : st?.candidate_release?.id === r.id ? 'candidate' : r.known_good ? 'known good' : ' '}</span></td>
                     <td><Badge tone={relTone(r.status)}>{r.status.replace(/_/g, ' ').toLowerCase()}</Badge></td>
                     <td className="mono small">{r.commit_sha ? r.commit_sha.slice(0, 12) : '—'}</td>
