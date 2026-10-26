@@ -35,8 +35,8 @@ app.add_middleware(
     allow_origins=settings.cors_origins,
     # The dashboard only reads. Browsers may not POST: writes come from CI (HMAC) only.
     allow_credentials=False,
-    allow_methods=["GET"],
-    allow_headers=["Content-Type"],
+    allow_methods=["GET", "OPTIONS", "HEAD"],
+    allow_headers=["Content-Type", "Accept", "Authorization", "X-Requested-With"],
 )
 
 
