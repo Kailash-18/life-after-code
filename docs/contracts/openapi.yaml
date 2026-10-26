@@ -58,6 +58,39 @@ paths:
           $ref: '#/components/responses/ErrorResponse'
 
   /api/v1/events:
+    get:
+      summary: Global Event Ledger Query
+      description: Returns the chronological event ledger with optional filtering.
+      operationId: listEvents
+      tags: [events]
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 100
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            default: 0
+        - in: query
+          name: type
+          schema:
+            type: string
+        - in: query
+          name: incident_id
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of chronological ledger events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TimelineEvent'
     post:
       summary: Ingest CI / Pipeline Stage Event
       description: >
@@ -458,6 +491,113 @@ paths:
           $ref: '#/components/responses/ErrorResponse'
         '404':
           $ref: '#/components/responses/ErrorResponse'
+
+  /api/v1/sre/health:
+    get:
+      summary: SRE Composite Health and Error Budget
+      description: Returns composite health score, Mann-Whitney U test, and error budget burn rate.
+      operationId: getSreHealth
+      tags: [sre]
+      parameters:
+        - in: query
+          name: slo_target
+          schema:
+            type: number
+            default: 0.999
+      responses:
+        '200':
+          description: SRE composite health telemetry
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /api/v1/sre/opa:
+    get:
+      summary: OPA Rego Policy Compliance Report
+      description: Returns policy-as-code Zero-Trust compliance evaluation.
+      operationId: getOpaCompliance
+      tags: [sre]
+      responses:
+        '200':
+          description: OPA Rego policy evaluation result
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /api/v1/sre/opa/validate:
+    post:
+      summary: Validate Custom Manifest against OPA Rego
+      description: Evaluates an arbitrary deployment manifest against admission policies.
+      operationId: validateOpaManifest
+      tags: [sre]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Validation result
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /api/v1/sre/ebpf:
+    get:
+      summary: L4/L7 eBPF Kernel Transport Latency Decomposition
+      description: Returns nanosecond transport latency decomposition and kernel socket metrics.
+      operationId: getEbpfTelemetry
+      tags: [sre]
+      parameters:
+        - in: query
+          name: samples
+          schema:
+            type: integer
+            default: 5
+      responses:
+        '200':
+          description: eBPF kernel telemetry report
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /api/v1/sre/dr:
+    get:
+      summary: Multi-Region Disaster Recovery Status
+      description: Returns cross-region failover readiness, RTO, and RPO SLAs.
+      operationId: getDisasterRecoveryStatus
+      tags: [sre]
+      responses:
+        '200':
+          description: Disaster recovery status and metrics
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /api/v1/sre/drift:
+    get:
+      summary: EWMA and CUSUM Adaptive Drift Detection
+      description: Returns two-sided CUSUM and EWMA change-point telemetry for latency drift.
+      operationId: getAdaptiveDrift
+      tags: [sre]
+      parameters:
+        - in: query
+          name: observed_latency
+          schema:
+            type: number
+      responses:
+        '200':
+          description: Adaptive drift status
+          content:
+            application/json:
+              schema:
+                type: object
 
 components:
   responses:
