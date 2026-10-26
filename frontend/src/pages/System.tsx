@@ -267,6 +267,10 @@ function SREOperations() {
       <SecHead num="B" title="SRE Platform Telemetry & Observability Center">
         Statistical hypothesis testing, multi-window error budget burn rate, OPA Zero-Trust Rego guardrails, L4/L7 eBPF socket decomposition, and multi-region disaster recovery SLAs.
       </SecHead>
+      <p className="sre-sim" role="note">
+        <strong>Simulated telemetry.</strong> {source === 'demo' ? 'Scripted demo values.' : 'The backend computes these panels from simulations and a reference manifest (eBPF traces, DR failover drill, OPA policy check), not from measurements of the running service.'}
+        {' '}They play no part in the recovery loop: health, rollback, merge and recovery are decided only by the evaluator, the gates and CI.
+      </p>
       <div className="sre-grid">
         <Tilt className="card" max={8}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
