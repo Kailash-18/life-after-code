@@ -215,6 +215,38 @@ def get_deployment_strategies_catalog(diff_risk: dict[str, Any] | None = None) -
     }
 
 
+def _gcloud(args: list[str]) -> subprocess.CompletedProcess:
+    return subprocess.run(["gcloud", *args], text=True, capture_output=True)
+
+
+def describe_service(service_name: str, region: str) -> dict[str, Any] | None:
+    """The Cloud Run service as gcloud reports it, or None if it does not exist / cannot be read."""
+    try:
+        res = _gcloud(["run", "services", "describe", service_name, f"--region={region}", "--format=json"])
+    except FileNotFoundError:
+        return None
+    if res.returncode != 0:
+        return None
+    try:
+        return json.loads(res.stdout)
+    except json.JSONDecodeError:
+        return None
+
+
+def _tag_url(service: dict[str, Any] | None, tag: str) -> str | None:
+    for entry in (service or {}).get("status", {}).get("traffic", []) or []:
+        if entry.get("tag") == tag and entry.get("url"):
+            return entry["url"]
+    return None
+
+
+def _serving_revision(service: dict[str, Any] | None) -> str | None:
+    """The revision that currently gets most public traffic (the one to roll back to)."""
+    best = None
+    for entry in (service or {}).get("status", {}).get("traffic", []) or []:
+        if entry.get("revisionName") and entry.get("percent", 0) > (best or {}).get("percent", 0):
+            best = entry
+    return best["revisionName"] if best else None
 
 def deploy_candidate_revision(
     service_name: str,
@@ -223,12 +255,21 @@ def deploy_candidate_revision(
     region: str = "us-central1",
     env_vars: dict[str, str] | None = None,
     dry_run: bool = False,
+    commit_sha: str | None = None,
 ) -> dict[str, Any]:
+    """Deploy the image as a new revision tagged `candidate` with 0 % public traffic.
+
+    A failed or impossible deploy returns success=False: nothing is ever recorded as deployed
+    unless gcloud said so. The very first deploy of a service cannot use --no-traffic; it then
+    takes 100 % (there is no stable revision to protect yet) and `initial_release` is True.
+    """
     print(f"[*] Deploying Cloud Run candidate revision for {service_name} (Image: {image_uri})...")
-    rev_name = f"{service_name}-cand-{int(datetime.now(UTC).timestamp()) % 100000}"
+    short = (commit_sha or "manual")[:7]
+    suffix = f"c{short}-{int(datetime.now(UTC).timestamp()) % 100000}"
+    rev_name = f"{service_name}-{suffix}"
 
     if dry_run or os.environ.get("SENTINEL_SIMULATION_MODE") == "true":
-        print(f"[+] [SIMULATION] gcloud run deploy {service_name} --image={image_uri} --no-traffic --tag={candidate_tag} --revision-suffix={rev_name}")
+        print(f"[+] [SIMULATION] gcloud run deploy {service_name} --image={image_uri} --no-traffic --tag={candidate_tag} --revision-suffix={suffix}")
         candidate_tag_url = f"https://{candidate_tag}---{service_name}-uc.a.run.app"
         return {
             "success": True,
@@ -236,92 +277,123 @@ def deploy_candidate_revision(
             "revision_name": rev_name,
             "tag": candidate_tag,
             "tag_url": candidate_tag_url,
+            "stable_url": None,
+            "stable_revision": None,
             "traffic_percent": 0,
+            "initial_release": False,
             "mode": "simulation",
         }
 
+    existing = describe_service(service_name, region)
     cmd = [
-        "gcloud", "run", "deploy", service_name,
+        "run", "deploy", service_name,
         f"--image={image_uri}",
-        "--no-traffic",
         f"--tag={candidate_tag}",
         f"--region={region}",
-        f"--revision-suffix={rev_name}",
+        f"--revision-suffix={suffix}",
+        "--allow-unauthenticated",
+        "--quiet",
         "--format=json",
     ]
-
+    if existing is not None:
+        cmd.insert(3, "--no-traffic")
     if env_vars:
-        env_str = ",".join(f"{k}={v}" for k, v in env_vars.items())
-        cmd.append(f"--set-env-vars={env_str}")
+        cmd.append("--set-env-vars=" + ",".join(f"{k}={v}" for k, v in env_vars.items()))
 
     try:
-        out = subprocess.check_output(cmd, text=True, stderr=subprocess.STDOUT)
-        data = json.loads(out)
-        tag_url = data.get("status", {}).get("url", f"https://{candidate_tag}---{service_name}.run.app")
-        return {
-            "success": True,
-            "service": service_name,
-            "revision_name": rev_name,
-            "tag": candidate_tag,
-            "tag_url": tag_url,
-            "traffic_percent": 0,
-            "mode": "gcloud",
-        }
-    except Exception as e:
-        print(f"[!] Warning: gcloud run deploy fallback ({e}); recording simulated deployment.", file=sys.stderr)
-        candidate_tag_url = f"https://{candidate_tag}---{service_name}-uc.a.run.app"
-        return {
-            "success": True,
-            "service": service_name,
-            "revision_name": rev_name,
-            "tag": candidate_tag,
-            "tag_url": candidate_tag_url,
-            "traffic_percent": 0,
-            "mode": "fallback_local",
-        }
+        res = _gcloud(cmd)
+    except FileNotFoundError:
+        print("[-] gcloud is not installed here; nothing was deployed.", file=sys.stderr)
+        return {"success": False, "service": service_name, "revision_name": None, "mode": "gcloud",
+                "error": "gcloud not found"}
+    if res.returncode != 0:
+        print(f"[-] gcloud run deploy failed; nothing was deployed.\n{res.stderr.strip()[-2000:]}", file=sys.stderr)
+        return {"success": False, "service": service_name, "revision_name": None, "mode": "gcloud",
+                "error": res.stderr.strip()[-2000:]}
+
+    service = describe_service(service_name, region)
+    stable_url = (service or {}).get("status", {}).get("url")
+    return {
+        "success": True,
+        "service": service_name,
+        "revision_name": rev_name,
+        "tag": candidate_tag,
+        "tag_url": _tag_url(service, candidate_tag),
+        "stable_url": stable_url,
+        "stable_revision": _serving_revision(existing),
+        "traffic_percent": 100 if existing is None else 0,
+        "initial_release": existing is None,
+        "mode": "gcloud",
+    }
 
 
 def adjust_canary_traffic(
     service_name: str,
-    candidate_revision: str,
+    candidate_revision: str | None,
     candidate_percent: int,
-    stable_revision: str,
+    stable_revision: str | None = None,
     region: str = "us-central1",
     dry_run: bool = False,
+    candidate_tag: str = "candidate",
 ) -> dict[str, Any]:
+    """Give the candidate `candidate_percent` of public traffic. Fails loudly; never pretends."""
     stable_percent = 100 - candidate_percent
-    print(f"[*] Allocating traffic: Candidate ({candidate_revision})={candidate_percent}%, Stable ({stable_revision})={stable_percent}%...")
+    print(f"[*] Allocating traffic: Candidate ({candidate_revision or candidate_tag})={candidate_percent}%, Stable ({stable_revision or 'current'})={stable_percent}%...")
 
     if dry_run or os.environ.get("SENTINEL_SIMULATION_MODE") == "true":
-        print(f"[+] [SIMULATION] gcloud run services update-traffic {service_name} --to-revisions={candidate_revision}={candidate_percent},{stable_revision}={stable_percent}")
-        return {
-            "success": True,
-            "traffic_split": {
-                candidate_revision: candidate_percent,
-                stable_revision: stable_percent,
-            },
-            "mode": "simulation",
-        }
+        split = {candidate_revision or candidate_tag: candidate_percent}
+        if stable_revision:
+            split[stable_revision] = stable_percent
+        print(f"[+] [SIMULATION] gcloud run services update-traffic {service_name} --to-tags={candidate_tag}={candidate_percent}")
+        return {"success": True, "traffic_split": split, "mode": "simulation"}
 
-    cmd = [
-        "gcloud", "run", "services", "update-traffic", service_name,
-        f"--to-revisions={candidate_revision}={candidate_percent},{stable_revision}={stable_percent}",
-        f"--region={region}",
-        "--format=json",
-    ]
+    if stable_revision and candidate_revision:
+        target = f"--to-revisions={candidate_revision}={candidate_percent},{stable_revision}={stable_percent}"
+    else:
+        target = f"--to-tags={candidate_tag}={candidate_percent}"
     try:
-        out = subprocess.check_output(cmd, text=True, stderr=subprocess.STDOUT)
-        return {"success": True, "output": out, "mode": "gcloud"}
+        res = _gcloud(["run", "services", "update-traffic", service_name, target, f"--region={region}", "--quiet", "--format=json"])
+    except FileNotFoundError:
+        print("[-] gcloud is not installed here; traffic was NOT moved.", file=sys.stderr)
+        return {"success": False, "mode": "gcloud", "error": "gcloud not found"}
+    if res.returncode != 0:
+        print(f"[-] gcloud update-traffic failed; traffic was NOT moved.\n{res.stderr.strip()[-2000:]}", file=sys.stderr)
+        return {"success": False, "mode": "gcloud", "error": res.stderr.strip()[-2000:]}
+    return {"success": True, "output": res.stdout, "mode": "gcloud"}
+
+
+def _emit_canary_started(rev_name, traffic_percent, pipeline_id, job_id, commit_sha, release_id, diff_risk=None) -> None:
+    try:
+        data = {"revision_name": rev_name, "traffic_percent": traffic_percent, "target": "candidate"}
+        if diff_risk:
+            data["diff_risk"] = diff_risk
+        emit_event(
+            event_type="deploy.canary_started",
+            source="sentinel-canary-deploy:automated",
+            pipeline_id=pipeline_id,
+            job_id=job_id,
+            commit_sha=commit_sha,
+            release_id=release_id,
+            data=data,
+        )
     except Exception as e:
-        print(f"[!] Warning: gcloud update-traffic fallback ({e})", file=sys.stderr)
-        return {
-            "success": True,
-            "traffic_split": {
-                candidate_revision: candidate_percent,
-                stable_revision: stable_percent,
-            },
-            "mode": "fallback_local",
-        }
+        print(f"[!] Warning: could not emit deploy.canary_started: {e}", file=sys.stderr)
+
+
+def _write_outputs(report: dict[str, Any]) -> None:
+    artifact_dir = Path("artifacts")
+    artifact_dir.mkdir(exist_ok=True)
+    with open(artifact_dir / "canary-deploy-report.json", "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2)
+    # dotenv for later CI jobs (GitLab `artifacts:reports:dotenv`)
+    lines = []
+    for key, value in (("CANDIDATE_REVISION", report.get("candidate_revision")),
+                       ("CANDIDATE_URL", report.get("candidate_tag_url")),
+                       ("STABLE_URL", report.get("stable_url")),
+                       ("STABLE_REVISION", report.get("stable_revision"))):
+        if value:
+            lines.append(f"{key}={value}")
+    (artifact_dir / "deploy.env").write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
 
 
 def run_canary_deployment(
@@ -337,9 +409,7 @@ def run_canary_deployment(
     emit_to_backend: bool = True,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    env_vars = {}
-    if fault_injection:
-        env_vars["FAULT_INJECTION_MODE"] = "true"
+    env_vars = {"FAULT_INJECTION_MODE": "true"} if fault_injection else {}
 
     deploy_res = deploy_candidate_revision(
         service_name=service_name,
@@ -348,10 +418,9 @@ def run_canary_deployment(
         region=region,
         env_vars=env_vars,
         dry_run=dry_run,
+        commit_sha=commit_sha,
     )
-
-    rev_name = deploy_res["revision_name"]
-    tag_url = deploy_res["tag_url"]
+    rev_name = deploy_res.get("revision_name")
 
     # Compute risk score for diff
     diff_risk = score_diff_risk(
@@ -359,56 +428,71 @@ def run_canary_deployment(
         branch=os.environ.get("CI_COMMIT_REF_NAME", "duo/fix"),
     )
 
-    # Emit deploy.canary_started
-    if emit_to_backend:
-        try:
-            emit_event(
-                event_type="deploy.canary_started",
-                source="sentinel-canary-deploy:automated",
-                pipeline_id=pipeline_id,
-                job_id=job_id,
-                commit_sha=commit_sha,
-                release_id=release_id,
-                data={
-                    "revision_name": rev_name,
-                    "traffic_percent": initial_traffic or diff_risk["adaptive_rollout_steps"][0]["traffic_percent"],
-                    "target": "candidate",
-                    "diff_risk": diff_risk,
-                },
-            )
-        except Exception as e:
-            print(f"[!] Warning: could not emit deploy.canary_started: {e}", file=sys.stderr)
-
-    report = {
+    report: dict[str, Any] = {
         "timestamp": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "service": service_name,
         "release_id": release_id,
         "candidate_revision": rev_name,
-        "candidate_tag_url": tag_url,
+        "candidate_tag_url": deploy_res.get("tag_url"),
+        "stable_url": deploy_res.get("stable_url"),
+        "stable_revision": deploy_res.get("stable_revision"),
         "initial_traffic_percent": initial_traffic or diff_risk["adaptive_rollout_steps"][0]["traffic_percent"],
         "diff_risk": diff_risk,
         "deploy_res": deploy_res,
+        "success": bool(deploy_res.get("success")),
     }
+    if not deploy_res.get("success"):
+        _write_outputs(report)
+        return report
 
-    artifact_dir = Path("artifacts")
-    artifact_dir.mkdir(exist_ok=True)
-    report_file = artifact_dir / "canary-deploy-report.json"
-    with open(report_file, "w", encoding="utf-8") as f:
-        json.dump(report, f, indent=2)
+    traffic = deploy_res.get("traffic_percent", 0)
+    if initial_traffic > 0 and not deploy_res.get("initial_release"):
+        shift = adjust_canary_traffic(service_name, rev_name, initial_traffic, region=region, dry_run=dry_run)
+        report["traffic_res"] = shift
+        if not shift.get("success"):
+            report["success"] = False
+            _write_outputs(report)
+            return report
+        traffic = initial_traffic
+    elif dry_run:
+        traffic = initial_traffic
+    report["traffic_percent"] = traffic
+
+    # Recorded only after gcloud confirmed the deploy (and the traffic step, if any).
+    if emit_to_backend:
+        _emit_canary_started(rev_name, traffic, pipeline_id, job_id, commit_sha, release_id, diff_risk=diff_risk)
+
+    _write_outputs(report)
 
     # Enterprise S3 Remote State Checkpoint
     try:
         from sentinel.scripts.s3_state_manager import S3StateManager
 
         s3_mgr = S3StateManager()
-        s3_snap = s3_mgr.snapshot_state_file(report, metadata={"type": "canary_deploy", "strategy": report.get("strategy", "canary_progressive")})
-        report["s3_state_snapshot"] = s3_snap
+        report["s3_state_snapshot"] = s3_mgr.snapshot_state_file(report, metadata={"type": "canary_deploy", "strategy": "canary_progressive"})
     except Exception:
         pass
 
-
     return report
 
+
+def shift_canary_traffic(
+    service_name: str,
+    candidate_revision: str | None,
+    percent: int,
+    region: str = "us-central1",
+    pipeline_id: str | None = None,
+    job_id: str | None = None,
+    commit_sha: str | None = None,
+    release_id: str | None = None,
+    emit_to_backend: bool = True,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Move an already deployed candidate to `percent` and record the step once gcloud confirmed it."""
+    res = adjust_canary_traffic(service_name, candidate_revision, percent, region=region, dry_run=dry_run)
+    if res.get("success") and emit_to_backend:
+        _emit_canary_started(candidate_revision, percent, pipeline_id, job_id, commit_sha, release_id)
+    return res
 
 
 def main() -> None:
@@ -435,6 +519,10 @@ def main() -> None:
     parser.add_argument("--commit-sha", help="Git commit SHA")
     parser.add_argument("--dry-run", action="store_true", help="Simulate deployment without gcloud")
     parser.add_argument("--no-emit", action="store_true", help="Do not emit events to backend")
+    parser.add_argument("--shift-only", action="store_true",
+                        help="Do not deploy: move the already deployed candidate to --traffic-percent")
+    parser.add_argument("--candidate-revision", default=os.environ.get("CANDIDATE_REVISION"),
+                        help="Candidate revision name (for --shift-only)")
 
     args = parser.parse_args()
 
@@ -466,7 +554,21 @@ def main() -> None:
         print(f"\n[!] WARNING: Strategy '{args.strategy}' deviates from the authoritative recommendation ('canary_progressive').")
         print("    Recommendation: Progressive Canary (Tag-Isolated) guarantees <1.5s rollback and 10% max initial blast radius.\n", file=sys.stderr)
 
-    run_canary_deployment(
+    if args.shift_only:
+        res = shift_canary_traffic(
+            service_name=args.service,
+            candidate_revision=args.candidate_revision,
+            percent=args.traffic_percent,
+            region=args.region,
+            pipeline_id=args.pipeline_id,
+            job_id=args.job_id,
+            commit_sha=args.commit_sha,
+            emit_to_backend=not args.no_emit,
+            dry_run=args.dry_run,
+        )
+        sys.exit(0 if res.get("success") else 1)
+
+    report = run_canary_deployment(
         service_name=args.service,
         image_uri=args.image,
         release_id=args.release_id,
@@ -479,6 +581,12 @@ def main() -> None:
         emit_to_backend=not args.no_emit,
         dry_run=args.dry_run,
     )
+    if not report.get("success"):
+        print("[-] Canary deployment did not happen (see above).", file=sys.stderr)
+        sys.exit(1)
+    print(f"[+] Candidate {report['candidate_revision']} deployed; public traffic {report.get('traffic_percent', 0)}%.")
+    if report.get("candidate_tag_url"):
+        print(f"    Candidate URL: {report['candidate_tag_url']}")
 
 
 if __name__ == "__main__":

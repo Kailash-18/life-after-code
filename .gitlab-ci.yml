@@ -13,19 +13,19 @@ stages:
   - evidence
   - gate-verify
   - auto-merge
-  - redeploy
 
 variables:
   PYTHONUNBUFFERED: "1"
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
   SENTINEL_BACKEND_URL: "http://sentinel-backend:8000"
-  SENTINEL_HMAC_SECRET: "hackathon-transcend-sentinel-key-2026"
+  # SENTINEL_HMAC_SECRET is deliberately NOT set here: this repo is public. Define it as a
+  # protected + masked project variable (same value as the backend's secret).
   GCP_PROJECT_ID: "project-sentinel-hackathon"
   GCP_REGION: "us-central1"
   GCP_FAILOVER_REGION: "us-east1"
   TARGET_APP_SERVICE: "sentinel-target-app"
   SENTINEL_ENV: "prod"
-  SENTINEL_DRY_RUN: "false"
+  SENTINEL_DEPLOY_MODE: "local"   # "cloudrun" once the GCP variables are set (see the deploy stages)
   # Terraform Security Variable Mappings (Injected via TF_VAR_* without hardcoded secrets)
   TF_VAR_project_id: "$GCP_PROJECT_ID"
   TF_VAR_region: "$GCP_REGION"
@@ -56,8 +56,10 @@ lifecycle:9-stage-audit:
 plan:finops-greenops:
   stage: lint
   image: python:3.11-slim
+  before_script:
+    - pip install pyyaml jsonschema
   script:
-    - echo "==> [Stage: PLAN] FinOps Forecast & ISO/IEC 21031 SCI Carbon Assessment"
+    - 'echo "==> [Stage: PLAN] FinOps Forecast & ISO/IEC 21031 SCI Carbon Assessment"'
     - python sentinel/scripts/finops_engine.py --dry-run
     - python sentinel/scripts/sci_carbon_engine.py --dry-run
   artifacts:
@@ -156,7 +158,7 @@ chaos:cloud-traffic-rebalance:
   stage: test
   image: python:3.11-slim
   before_script:
-    - pip install pyyaml
+    - pip install pyyaml jsonschema
   script:
     - echo "==> Running Multi-Region Cloud Resilience & Dynamic Traffic Rebalancing Drill"
     - python sentinel/scripts/cloud_traffic_rebalancer.py --output-dir artifacts
@@ -193,6 +195,8 @@ test:drift-detection:
 security:sast-gate:
   stage: security
   image: python:3.11-slim
+  before_script:
+    - pip install jsonschema
   script:
     - echo "==> Running Sentinel SAST and Secret Scanner Gate"
     - python sentinel/scripts/sast_gate.py --dirs app backend sentinel --output-dir artifacts
@@ -274,7 +278,7 @@ govern:cis-zero-trust:
   stage: security
   image: python:3.11-slim
   script:
-    - echo "==> [Stage: GOVERN] CIS Multi-Cloud Zero-Trust Benchmark Audit"
+    - 'echo "==> [Stage: GOVERN] CIS Multi-Cloud Zero-Trust Benchmark Audit"'
     - python sentinel/scripts/cis_governance_guard.py --dry-run
   artifacts:
     when: always
@@ -303,7 +307,7 @@ infra:s3-state-audit:
   stage: infra
   image: python:3.11-slim
   before_script:
-    - pip install boto3 botocore
+    - pip install boto3 botocore jsonschema
   script:
     - echo "==> Running Enterprise S3 Remote State & DynamoDB Distributed Lock Audit"
     - python sentinel/scripts/s3_state_manager.py audit
@@ -316,7 +320,7 @@ infra:finops-carbon-guard:
   stage: infra
   image: python:3.11-slim
   before_script:
-    - pip install pyyaml
+    - pip install pyyaml jsonschema
   script:
     - echo "==> Evaluating Multi-Cloud FinOps Spend Budget & GreenOps Carbon Intensity"
     - python sentinel/scripts/finops_guard.py --policy sentinel/policy.yaml --output-dir artifacts
@@ -327,75 +331,122 @@ infra:finops-carbon-guard:
 
 
 # ==============================================================================
-# STAGE 5: CANARY DEPLOYMENT (Task K4)
+# STAGES 5-8: DEPLOY, EVALUATE, ROLL BACK, COLLECT EVIDENCE (default branch only)
+#
+# SENTINEL_DEPLOY_MODE (project CI/CD variable):
+#   local    (default) no cloud. The job runs this commit's app (candidate) next to the
+#            previous commit's app (stable) and the real evaluator measures both. Nothing is
+#            deployed and nothing is rolled back; the pipeline fails if the candidate is unhealthy.
+#   cloudrun build the image, deploy it to Cloud Run as a tagged candidate with 0 % traffic,
+#            ramp 10 -> 50 -> 100 % with the evaluator after each step, roll back on a breach.
+#            Needs: GCP_PROJECT_ID, GCP_REGION, GCP_SA_KEY (File variable, service-account JSON),
+#            SENTINEL_BACKEND_URL and SENTINEL_HMAC_SECRET (masked).
+# A merged repair MR lands on the default branch, so its pipeline IS the redeploy.
 # ==============================================================================
-deploy:canary:
-  stage: deploy-canary
-  image: python:3.11-slim
-  before_script:
-    - pip install pyyaml jsonschema requests
-  script:
-    - echo "==> Deploying candidate release to Cloud Run with 0% initial traffic tag"
-    - extra_args="" ; if [ "$SENTINEL_DRY_RUN" = "true" ]; then extra_args="--dry-run"; fi
-    - python sentinel/scripts/canary_deploy.py --service $TARGET_APP_SERVICE --traffic-percent 10 $extra_args
-  artifacts:
-    paths:
-      - artifacts/canary-deploy-report.json
+.on-default-branch-local:
   rules:
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH || $CI_COMMIT_BRANCH == "master" || $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $SENTINEL_DEPLOY_MODE != "cloudrun"
 
-# ==============================================================================
-# STAGE 6: HEALTH EVALUATION (Task K5)
-# ==============================================================================
-evaluate:canary-step:
+.on-default-branch-cloudrun:
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $SENTINEL_DEPLOY_MODE == "cloudrun"
+
+.gcloud:
+  image: google/cloud-sdk:slim
+  variables:
+    TARGET_APP_IMAGE: "$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/sentinel/target-app:$CI_COMMIT_SHORT_SHA"
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends python3-yaml python3-jsonschema python3-requests > /dev/null
+    - if [ -n "$GCP_SA_KEY" ]; then gcloud auth activate-service-account --key-file="$GCP_SA_KEY" --quiet; fi
+    - if [ -n "$GCP_PROJECT_ID" ]; then gcloud config set project "$GCP_PROJECT_ID" --quiet; fi
+
+canary:local-evaluate:
+  extends: .on-default-branch-local
   stage: evaluate-canary
   image: python:3.11-slim
+  variables:
+    GIT_DEPTH: "0"
   before_script:
-    - pip install pyyaml jsonschema requests
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends git curl > /dev/null
+    - git config --global --add safe.directory "$CI_PROJECT_DIR"
+    - pip install -q -r app/requirements.txt pyyaml jsonschema requests
   script:
-    - echo "==> Running Authoritative Sentinel Health Evaluator"
-    - python sentinel/scripts/evaluator.py --candidate-url "http://sentinel-target-app:8080" --traffic-percent 10 || exit_code=$?
-    - if [ "$exit_code" -eq 2 ]; then echo "Evaluator detected regression! Triggering rollback."; exit 2; fi
+    - STABLE_SHA="$CI_COMMIT_BEFORE_SHA"
+    - if ! git cat-file -e "$STABLE_SHA^{commit}" 2>/dev/null; then STABLE_SHA=$(git rev-parse HEAD~1 2>/dev/null || git rev-parse HEAD); fi
+    - echo "==> No cloud deployment (SENTINEL_DEPLOY_MODE=local). Candidate $CI_COMMIT_SHORT_SHA vs stable $(echo $STABLE_SHA | cut -c1-8), both started in this job"
+    - git worktree add -q --detach /tmp/stable "$STABLE_SHA"
+    - (cd /tmp/stable/app && uvicorn app.main:app --host 127.0.0.1 --port 8080 > /tmp/stable.log 2>&1 &)
+    - (cd app && uvicorn app.main:app --host 127.0.0.1 --port 8081 > /tmp/candidate.log 2>&1 &)
+    - for i in $(seq 1 30); do curl -sf http://127.0.0.1:8080/healthz > /dev/null && curl -sf http://127.0.0.1:8081/healthz > /dev/null && break; sleep 1; done
+    - python sentinel/scripts/evaluator.py --candidate-url http://127.0.0.1:8081 --stable-url http://127.0.0.1:8080 --traffic-percent 100 --revision-name "local-$CI_COMMIT_SHORT_SHA" --pipeline-id "$CI_PIPELINE_ID" --job-id "$CI_JOB_ID" --commit-sha "$CI_COMMIT_SHA"
   artifacts:
     when: always
     paths:
       - artifacts/evaluator-report.json
       - artifacts/evaluator-report.md
-  rules:
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH || $CI_COMMIT_BRANCH == "master" || $CI_COMMIT_BRANCH == "main"
 
-# ==============================================================================
-# STAGE 7: AUTOMATED ROLLBACK (Task K6)
-# ==============================================================================
-rollback:on-breach:
-  stage: rollback
-  image: python:3.11-slim
-  before_script:
-    - pip install jsonschema requests
+build:target-app:
+  extends: [.gcloud, .on-default-branch-cloudrun]
+  stage: deploy-canary
   script:
-    - echo "==> Reverting 100% traffic to last known-good revision"
-    - extra_args="" ; if [ "$SENTINEL_DRY_RUN" = "true" ]; then extra_args="--dry-run"; fi
-    - python sentinel/scripts/rollback.py --service $TARGET_APP_SERVICE --stable-url "http://sentinel-target-app:8080" $extra_args
+    - gcloud artifacts repositories describe sentinel --location="$GCP_REGION" > /dev/null 2>&1 || gcloud artifacts repositories create sentinel --repository-format=docker --location="$GCP_REGION" --quiet
+    - gcloud builds submit app --tag "$TARGET_APP_IMAGE" --quiet
+
+deploy:canary:
+  extends: [.gcloud, .on-default-branch-cloudrun]
+  stage: deploy-canary
+  needs: [build:target-app]
+  script:
+    - echo "==> Deploying $TARGET_APP_IMAGE as the tagged candidate (0 % public traffic), then 10 %"
+    - python3 sentinel/scripts/canary_deploy.py --service "$TARGET_APP_SERVICE" --image "$TARGET_APP_IMAGE" --region "$GCP_REGION" --traffic-percent 10 --pipeline-id "$CI_PIPELINE_ID" --job-id "$CI_JOB_ID" --commit-sha "$CI_COMMIT_SHA"
+  artifacts:
+    when: always
+    paths:
+      - artifacts/canary-deploy-report.json
+    reports:
+      dotenv: artifacts/deploy.env
+
+evaluate:canary-step:
+  extends: [.gcloud, .on-default-branch-cloudrun]
+  stage: evaluate-canary
+  needs: [deploy:canary]
+  script:
+    - |
+      for pct in 10 50 100; do
+        if [ "$pct" != "10" ]; then
+          python3 sentinel/scripts/canary_deploy.py --shift-only --service "$TARGET_APP_SERVICE" --region "$GCP_REGION" --traffic-percent "$pct" --candidate-revision "$CANDIDATE_REVISION" --pipeline-id "$CI_PIPELINE_ID" --job-id "$CI_JOB_ID" --commit-sha "$CI_COMMIT_SHA"
+        fi
+        echo "==> Evaluating candidate at $pct %"
+        python3 sentinel/scripts/evaluator.py --candidate-url "$CANDIDATE_URL" --stable-url "$STABLE_URL" --traffic-percent "$pct" --revision-name "$CANDIDATE_REVISION" --pipeline-id "$CI_PIPELINE_ID" --job-id "$CI_JOB_ID" --commit-sha "$CI_COMMIT_SHA"
+      done
+  artifacts:
+    when: always
+    paths:
+      - artifacts/evaluator-report.json
+      - artifacts/evaluator-report.md
+
+rollback:on-breach:
+  extends: .gcloud
+  stage: rollback
+  needs: [deploy:canary, evaluate:canary-step]
+  script:
+    - 'echo "==> Breach or failed step: sending 100 % of traffic back to $STABLE_REVISION"'
+    - python3 sentinel/scripts/rollback.py --service "$TARGET_APP_SERVICE" --region "$GCP_REGION" --stable-url "$STABLE_URL" --known-good-rev "$STABLE_REVISION" --candidate-rev "$CANDIDATE_REVISION" --pipeline-id "$CI_PIPELINE_ID" --job-id "$CI_JOB_ID" --commit-sha "$CI_COMMIT_SHA"
   artifacts:
     when: always
     paths:
       - artifacts/rollback-report.json
   rules:
-    - if: ($CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH || $CI_COMMIT_BRANCH == "master" || $CI_COMMIT_BRANCH == "main")
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $SENTINEL_DEPLOY_MODE == "cloudrun"
       when: on_failure
 
-# ==============================================================================
-# STAGE 8: REDACTED EVIDENCE BUNDLE (Task K7)
-# ==============================================================================
 evidence:collect:
+  extends: .gcloud
   stage: evidence
-  image: python:3.11-slim
-  before_script:
-    - pip install jsonschema requests
   script:
     - echo "==> Constructing redacted evidence bundle & computing authoritative SHA-256"
-    - extra_args="" ; if [ "$SENTINEL_DRY_RUN" = "true" ]; then extra_args="--dry-run"; fi
-    - python sentinel/scripts/evidence_collector.py --service $TARGET_APP_SERVICE $extra_args
+    - extra_args="" ; if [ "$SENTINEL_DEPLOY_MODE" != "cloudrun" ]; then extra_args="--dry-run"; fi
+    - python3 sentinel/scripts/evidence_collector.py --service "$TARGET_APP_SERVICE" --evaluator-report artifacts/evaluator-report.json --pipeline-id "$CI_PIPELINE_ID" --job-id "$CI_JOB_ID" --commit-sha "$CI_COMMIT_SHA" $extra_args
     # Fixed name so the Duo investigation flow can fetch the bundle from this job's artifacts
     - cp "$(ls -t artifacts/evidence-bundle-*.json | head -1)" artifacts/evidence-bundle.json
   artifacts:
@@ -404,7 +455,7 @@ evidence:collect:
       - artifacts/evidence-bundle-*.json
       - artifacts/evidence-bundle.json
   rules:
-    - if: ($CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH || $CI_COMMIT_BRANCH == "master" || $CI_COMMIT_BRANCH == "main")
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       when: on_failure
 
 # ==============================================================================
@@ -429,7 +480,7 @@ evidence:collect:
 gate:regression-proof:
   extends: .repair-mr-gate
   script:
-    - echo "==> Regression proof for $INCIDENT_ID: $REGRESSION_TEST must fail with an assertion on $CI_MERGE_REQUEST_DIFF_BASE_SHA and pass on $CI_COMMIT_SHA"
+    - 'echo "==> Regression proof for $INCIDENT_ID: $REGRESSION_TEST must fail with an assertion on $CI_MERGE_REQUEST_DIFF_BASE_SHA and pass on $CI_COMMIT_SHA"'
     - status=0
     - python sentinel/scripts/regression_proof.py --broken "$CI_MERGE_REQUEST_DIFF_BASE_SHA" --fix "$CI_COMMIT_SHA" --test "$REGRESSION_TEST" --output-json artifacts/regression-proof.json --output-junit artifacts/regression-proof.xml || status=$?
     - python sentinel/scripts/report_gate_verdict.py --gate regression_proof --report artifacts/regression-proof.json --incident-id "$INCIDENT_ID"

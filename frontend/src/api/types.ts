@@ -170,27 +170,34 @@ export interface EndpointState { path: string; ok: boolean | null; at: number | 
 // Principal SRE, OPA Rego, eBPF & Multi-Region DR Telemetry Contracts
 // ==============================================================================
 
+/** Where a panel's numbers come from. Only "measured" reads the running service. */
+export interface DataSource {
+  kind: 'measured' | 'derived' | 'reference' | 'simulated';
+  note: string;
+}
+
 export interface SRECompositeHealth {
-  health_score: number;
-  status: 'PASS' | 'WARN' | 'FAIL';
+  health_score: number | null;
+  status: 'PASS' | 'WARN' | 'FAIL' | 'NO_DATA';
+  data_source?: DataSource;
   error_budget: {
     burn_rate: number;
     alert_tier: 'NORMAL' | 'TICKET' | 'PAGE_SEVERITY_2' | 'PAGE_SEVERITY_1';
     hours_to_exhaustion: number;
     recommended_action?: string;
-  };
+  } | null;
   hypothesis_testing: {
     p_value: number;
     is_significant: boolean;
     interpretation?: string;
-  };
+  } | null;
   latency_iqr?: {
     median: number;
     q1: number;
     q3: number;
     iqr: number;
     outlier_threshold: number;
-  };
+  } | null;
   statistical_anomalies_detected?: number;
 }
 
@@ -203,6 +210,7 @@ export interface OPAComplianceReport {
   violations_count: number;
   violations: string[];
   status: 'APPROVED' | 'REJECTED_BY_POLICY_GATE';
+  data_source?: DataSource;
 }
 
 export interface EBPFTelemetryReport {
@@ -221,6 +229,7 @@ export interface EBPFTelemetryReport {
     total_syn_queue_drops: number;
     retransmission_rate: number;
   };
+  data_source?: DataSource;
 }
 
 export interface DisasterRecoveryStatus {
@@ -231,6 +240,7 @@ export interface DisasterRecoveryStatus {
   rto_seconds: number;
   rpo_seconds: number;
   status: 'OPTIMAL' | 'DEGRADED';
+  data_source?: DataSource;
 }
 
 export interface S3StorageStatus {
@@ -256,14 +266,15 @@ export interface S3StorageStatus {
 
 export interface AdaptiveDriftStatus {
   timestamp: string;
-  observed_value: number;
-  current_ewma: number;
-  cusum_high_statistic: number;
-  cusum_low_statistic: number;
-  decision_threshold_h: number;
+  observed_value: number | null;
+  current_ewma: number | null;
+  cusum_high_statistic: number | null;
+  cusum_low_statistic: number | null;
+  decision_threshold_h: number | null;
   drift_detected: boolean;
   status: string;
   action: string;
+  data_source?: DataSource;
 }
 
 export interface DiffRiskReport {

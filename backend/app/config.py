@@ -2,8 +2,8 @@ import os
 
 from pydantic_settings import BaseSettings
 
-DEV_HMAC_SECRET = "sentinel-dev-secret-key-change-in-prod"
-DEV_WEBHOOK_SECRET = "sentinel-gitlab-token-change-in-prod"
+DEV_HMAC_SECRET = "sentinel-dev-secret-key-change-in-prod"  # sast: allow-public-placeholder (refused in production)
+DEV_WEBHOOK_SECRET = "sentinel-gitlab-token-change-in-prod"  # sast: allow-public-placeholder (refused in production)
 
 
 def _csv(name: str, default: str) -> list[str]:
