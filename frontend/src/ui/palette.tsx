@@ -5,8 +5,8 @@ import { useSentinel } from '../api/source';
 import { statusWord } from './kit';
 
 export const PAGES = [
-  { to: '/', label: 'Mission Control', hint: 'overview' },
-  { to: '/rollout', label: 'Rollout', hint: 'releases · canary · evaluator' },
+  { to: '/', label: 'Overview', hint: 'current state' },
+  { to: '/rollout', label: 'Releases', hint: 'releases · canary · evaluator' },
   { to: '/incidents', label: 'Incidents', hint: 'every regression caught' },
   { to: '/gates', label: 'Gates', hint: 'regression proof · Integrity Gate' },
   { to: '/ledger', label: 'Ledger', hint: 'every recorded event' },
@@ -51,7 +51,7 @@ export function Palette({ open, onClose }: { open: boolean; onClose: () => void 
     <div className="palette" role="dialog" aria-modal="true" aria-label="Command palette" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="palette__box" onKeyDown={key}>
         <div className="palette__in">
-          <span aria-hidden="true">⌘</span>
+          <svg className="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM20 20l-4-4" /></svg>
           <input ref={input} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Jump to a page, an incident, or an action…" aria-label="Search commands" />
           <kbd>esc</kbd>
         </div>
@@ -62,7 +62,7 @@ export function Palette({ open, onClose }: { open: boolean; onClose: () => void 
             return (
               <li key={c.id} role="option" aria-selected={i === sel}>
                 {head && <span className="palette__group">{head}</span>}
-                <button className={`palette__item${i === sel ? ' is-sel' : ''}`} onMouseEnter={() => setSel(i)} onClick={() => run(c)} data-cursor="Go">
+                <button className={`palette__item${i === sel ? ' is-sel' : ''}`} onMouseEnter={() => setSel(i)} onClick={() => run(c)}>
                   <b>{c.label}</b><span>{c.hint}</span><i aria-hidden="true">↵</i>
                 </button>
               </li>

@@ -1,7 +1,5 @@
-import gsap from 'gsap';
-import { ScrollTrigger } from 'gsap/ScrollTrigger';
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { HashRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { HashRouter, Link, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { SentinelProvider, useSentinel } from './api/source';
 import Gates from './pages/Gates';
 import Home from './pages/Home';
@@ -10,85 +8,72 @@ import Incidents from './pages/Incidents';
 import Ledger from './pages/Ledger';
 import Rollout from './pages/Rollout';
 import System from './pages/System';
-import { bus } from './state/bus';
-import { derive, MODE_COLOR, type SceneMode } from './state/derive';
-import { Mission, type SceneOverride } from './state/mission';
-import { MagButton } from './ui/fx';
-import { Boot, DemoBanner, TopBar } from './ui/hud';
+import { derive } from './state/derive';
+import { Mission } from './state/mission';
+import { Backdrop, Intro, useMotion } from './ui/fx';
+import { Icon } from './ui/icons';
+import { ago } from './ui/kit';
 import { PAGES, Palette } from './ui/palette';
 
-gsap.registerPlugin(ScrollTrigger);
-const Scene = lazy(() => import('./three/Scene').then((m) => ({ default: m.Scene })));
+const ICON: Record<string, string> = { '/': 'overview', '/rollout': 'releases', '/incidents': 'incidents', '/gates': 'gates', '/ledger': 'ledger', '/system': 'system' };
 
-/** A state change still registers in the core, but as a short, soft pulse. */
-const PULSE: Partial<Record<SceneMode, number>> = { breach: 0.8, failed: 0.7, recovered: 0.6 };
-
-/** Native scrolling; the scene only reads how far down the page you are. */
-function useScrollProgress() {
-  useEffect(() => {
-    const onScroll = () => {
-      const max = document.documentElement.scrollHeight - innerHeight;
-      bus.scroll = max > 0 ? scrollY / max : 0;
-    };
-    onScroll();
-    addEventListener('scroll', onScroll, { passive: true });
-    return () => removeEventListener('scroll', onScroll);
-  }, []);
-}
-
-/** One gentle fade-up per element, the first time it scrolls into view. */
-function useReveals(ready: boolean, key: string) {
-  useEffect(() => {
-    if (!ready || bus.reducedMotion) return;
-    const ctx = gsap.context(() => {
-      ScrollTrigger.batch('[data-reveal]', {
-        start: 'top 94%',
-        once: true,
-        onEnter: (els) => gsap.fromTo(els, { y: 14, opacity: 0 }, { y: 0, opacity: 1, duration: 0.45, stagger: 0.03, ease: 'power2.out', overwrite: true }),
-      });
-    });
-    const t = setTimeout(() => ScrollTrigger.refresh(), 200);
-    return () => { clearTimeout(t); ctx.revert(); };
-  }, [ready, key]);
-}
-
-function NotFound() {
-  const nav = useNavigate();
+function Logo() {
   return (
-    <div className="page"><header className="phead"><div className="phead__k"><span className="phead__num">404</span><span>No such console</span></div>
-      <h1 className="phead__title">Lost signal</h1>
-      <div className="phead__sub"><MagButton onClick={() => nav('/')} cursor="Home">Back to Mission Control</MagButton></div></header></div>
+    <svg viewBox="0 0 32 32" aria-hidden="true">
+      <rect width="32" height="32" rx="8" fill="url(#lg)" />
+      <defs><linearGradient id="lg" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stopColor="#a9b6ff" /><stop offset="1" stopColor="#5d6ee0" /></linearGradient></defs>
+      <path d="M16 6.5 24.5 10v6.2c0 4.6-3.5 8.2-8.5 9.8-5-1.6-8.5-5.2-8.5-9.8V10z" fill="none" stroke="#0a0b10" strokeWidth="2" strokeLinejoin="round" />
+      <path d="m12.4 16 2.6 2.6 4.8-5" fill="none" stroke="#0a0b10" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   );
 }
 
+function Link_({ now }: { now: number }) {
+  const { source, connected, stale, lastOkAt } = useSentinel();
+  const [dot, word, sub] = source === 'demo' ? ['warn', 'Demo scenario', 'scripted data']
+    : connected === null ? ['', 'Connecting', 'waiting for the API']
+    : !connected ? ['bad', 'API offline', 'nothing here is live']
+    : stale ? ['warn', 'Link stale', `last reading ${ago(lastOkAt ?? undefined, now)}`]
+    : ['ok', 'Live', `updated ${ago(lastOkAt ?? undefined, now)}`];
+  return (
+    <div className="link" role="status">
+      <span className={`dot dot--${dot}${dot === 'ok' ? ' dot--live' : ''}`} />
+      <span>{word}<small>{sub}</small></span>
+    </div>
+  );
+}
+
+function DemoBar() {
+  const { source, demoFail, exitDemo, startDemo } = useSentinel();
+  if (source !== 'demo') return null;
+  return (
+    <div className="demo-bar" role="note">
+      <b>Demo scenario</b>
+      <span>Scripted data, not telemetry. {demoFail ? 'This run shows the gates blocking a repair.' : 'This run shows a full recovery.'}</span>
+      <div className="row">
+        <button className="btn btn--sm" onClick={() => startDemo(!demoFail)}>{demoFail ? 'Play success path' : 'Play blocked path'}</button>
+        <button className="btn btn--sm" onClick={exitDemo}>Exit demo</button>
+      </div>
+    </div>
+  );
+}
+
+function NotFound() {
+  return <div className="empty"><b>No such page.</b><Link to="/">Back to the overview</Link></div>;
+}
+
 function Shell() {
-  const { snap, connected } = useSentinel();
+  const { snap, connected, source, startDemo } = useSentinel();
   const loc = useLocation();
   const nav = useNavigate();
   const [now, setNow] = useState(Date.now());
-  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 5000); return () => clearInterval(t); }, []);
   const d = useMemo(() => derive(snap, connected, now), [snap, connected, now]);
-  const [scene, setScene] = useState<SceneOverride | null>(null);
-  const [booted, setBooted] = useState(false);
-  const onBoot = useCallback(() => setBooted(true), []);
   const [palette, setPalette] = useState(false);
-  const [wide, setWide] = useState(() => innerWidth > 900);
-  useEffect(() => { const r = () => setWide(innerWidth > 900); addEventListener('resize', r); return () => removeEventListener('resize', r); }, []);
 
-  const mode = scene?.mode ?? d.mode;
-  const stages = scene?.stages ?? d.stages;
-  const home = loc.pathname === '/';
-
-  const prev = useRef<SceneMode | null>(null);
-  useEffect(() => {
-    if (prev.current && prev.current !== mode && PULSE[mode]) bus.pulse(PULSE[mode]);
-    prev.current = mode;
-  }, [mode]);
-
-  // Route change: start the new page at the top.
   useEffect(() => { scrollTo(0, 0); }, [loc.pathname]);
 
-  // Keys: ⌘K / Ctrl+K / "/" opens the palette; 1–6 jump between consoles.
+  // ⌘K / Ctrl+K or "/" opens the palette; 1–6 jump between pages.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const typing = /^(INPUT|TEXTAREA|SELECT)$/.test((e.target as HTMLElement)?.tagName ?? '');
@@ -102,22 +87,33 @@ function Shell() {
     return () => removeEventListener('keydown', onKey);
   }, [palette, nav]);
 
-  useScrollProgress();
-  useReveals(booted, `${loc.pathname}:${d.incident?.id ?? 'none'}:${Object.keys(snap.details).length}`);
-
-  const split = snap.status?.traffic_split;
-  const ctx = useMemo(() => ({ d, now, setScene }), [d, now]);
+  useMotion(loc.pathname);
+  const ctx = useMemo(() => ({ d, now }), [d, now]);
   return (
     <Mission.Provider value={ctx}>
-      <div className={`app mode-${mode}${home ? '' : ' is-sub'}`} style={{ ['--mode' as string]: MODE_COLOR[mode] }}>
-        <Suspense fallback={<div className="scene-fallback" />}>
-          <Scene mode={mode} stages={stages} candidatePct={split?.candidate_percent ?? 0} offsetX={wide ? (home ? 2.6 : 3.3) : 0} narrow={!wide} />
-        </Suspense>
-        <div className="grain" aria-hidden="true" />
-        <DemoBanner />
-        <TopBar mode={mode} onMenu={() => setPalette(true)} />
-        <main className={`content${booted ? ' is-in' : ''}`}>
-          <div key={loc.pathname} className="route">
+      <Backdrop />
+      <Intro />
+      <div className="shell">
+        <aside className="side">
+          <Link to="/" className="brand"><Logo /><div><b>Sentinel</b><span>Mission Control</span></div></Link>
+          <nav className="nav" aria-label="Pages">
+            <span className="nav__k">Console</span>
+            {PAGES.map((p, i) => (
+              <NavLink key={p.to} to={p.to} end={p.to === '/'} className={({ isActive }) => (isActive || (p.to === '/incidents' && loc.pathname.startsWith('/incidents')) ? 'is-on' : '')}>
+                <Icon name={ICON[p.to]} />{p.label}<kbd>{i + 1}</kbd>
+              </NavLink>
+            ))}
+          </nav>
+          <div className="side__foot">
+            <Link_ now={now} />
+            {source === 'live' && <button className="btn" onClick={() => startDemo(false)}><Icon name="play" />Play demo</button>}
+            <button className="search-hint" onClick={() => setPalette(true)}><span>Search</span><kbd>Ctrl K</kbd></button>
+          </div>
+        </aside>
+        <main className="main">
+          <div className="wrap">
+            <DemoBar />
+            <div className="route" key={loc.pathname}>
             <Routes>
               <Route path="/" element={<Home />} />
               <Route path="/rollout" element={<Rollout />} />
@@ -128,10 +124,10 @@ function Shell() {
               <Route path="/system" element={<System />} />
               <Route path="*" element={<NotFound />} />
             </Routes>
+            </div>
           </div>
         </main>
         <Palette open={palette} onClose={() => setPalette(false)} />
-        {!booted && <Boot onDone={onBoot} />}
         <p className="sr-only" role="status" aria-live="polite">{d.headline}</p>
       </div>
     </Mission.Provider>

@@ -6,6 +6,13 @@
 
 This document records the empirical results of the platform verification spike for Uncertainties 1–10 identified in Section 1 of the Project Sentinel Implementation Plan. Each item is marked as **WORKS**, **DOESN'T WORK**, or **WORKAROUND**, supported by technical evidence.
 
+> **Status note (Oct 26):** the matrix below was drafted as planned answers. Rows about GitLab Duo
+> (2–6), Google Cloud (7, 9) and GitLab.com (10) have **not** been run against the real platforms yet.
+> What *has* been verified, locally: both gates on a seeded fault (correct fix PROVEN and passes the
+> Integrity Gate; a test-weakening repair blocked by RULE_01/04/08); HMAC-signed events driving the real
+> backend through DETECTED → … → RECOVERED; Mission Control showing the result. Update each row with
+> what you observe when the pipeline and the flow run on GitLab.
+
 ---
 
 ## Verification Matrix (Uncertainties 1–10)

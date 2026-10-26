@@ -1,16 +1,17 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useSentinel } from '../api/source';
 import { buildStages, isFailure } from '../state/derive';
 import { useMission } from '../state/mission';
-import { Count, Tilt } from '../ui/fx';
-import { Chip, Empty, MiniLoop, PageHead, ago, dateTime, dur, spanMs, statusTone, statusWord } from '../ui/kit';
+import { Badge, Empty, Metric, Mini, PageHead, ago, dateTime, dur, spanMs, statusTone, statusWord } from '../ui/kit';
 
 type Filter = 'all' | 'open' | 'recovered' | 'stopped';
+const FILTERS: [Filter, string][] = [['all', 'All'], ['open', 'Open'], ['recovered', 'Recovered'], ['stopped', 'Stopped']];
 
 export default function Incidents() {
   const { snap } = useSentinel();
   const { d, now } = useMission();
+  const nav = useNavigate();
   const [f, setF] = useState<Filter>('all');
   const all = snap.incidents ?? [];
   const cls = (s: string): Filter => (s === 'RECOVERED' ? 'recovered' : isFailure(s) ? 'stopped' : 'open');
@@ -23,62 +24,52 @@ export default function Incidents() {
   const median = ttr.length ? ttr[Math.floor(ttr.length / 2)] : null;
 
   return (
-    <div className="page">
-      <PageHead num="02" kicker="Incidents · every regression Sentinel caught" title="Incidents">
-        <p>Each incident is one trip around the loop. Open one to see its evidence, the AI's proposal, the gates' verdicts and how it ended.</p>
+    <>
+      <PageHead eyebrow="Incidents" title="Every regression Sentinel caught">
+        Each incident is one trip around the loop. Open one to see the evidence, the AI's proposal, the gate verdicts and how it ended.
       </PageHead>
 
-      <div className="stats" data-reveal>
-        {([['all', 'Recorded'], ['open', 'Open'], ['recovered', 'Recovered'], ['stopped', 'Stopped']] as [Filter, string][]).map(([k, l]) => (
-          <button key={k} className={`stat stat--${k}${f === k ? ' is-on' : ''}`} onClick={() => setF(k)} data-cursor="Filter" aria-pressed={f === k}>
-            <b><Count value={count(k)} format={(v) => String(Math.round(v))} /></b><span>{l}</span>
-          </button>
-        ))}
-        <div className="stat stat--ttr">
-          <b>{median === null ? '—' : spanMs(median)}</b>
-          <span>median detect → verified recovery</span>
+      <div className="grid g4" style={{ marginBottom: 28 }}>
+        <div className="card tilt"><Metric value={count('all')} label="Recorded" /></div>
+        <div className="card tilt"><Metric value={count('recovered')} label="Recovered" tone={count('recovered') ? 'ok' : undefined} /></div>
+        <div className="card tilt"><Metric value={count('stopped')} label="Stopped or escalated" /></div>
+        <div className="card tilt"><Metric value={median === null ? '—' : spanMs(median)} label="Median time to verified recovery" /></div>
+      </div>
+
+      <div className="filters">
+        <div className="seg" role="group" aria-label="Filter incidents">
+          {FILTERS.map(([k, l]) => <button key={k} className={f === k ? 'is-on' : ''} onClick={() => setF(k)} aria-pressed={f === k}>{l}<small>{count(k)}</small></button>)}
         </div>
       </div>
 
-      <section className="sec sec--tight">
-        {snap.incidents === null ? <Empty title="Waiting for the incident list." /> : !list.length ? (
-          <Empty title={all.length ? 'No incidents match this filter.' : 'No incidents recorded.'}>{all.length ? 'Pick another filter above.' : 'The loop is armed. The first regression the evaluator catches will appear here.'}</Empty>
-        ) : (
-          <ol className="inclist">
-            {list.map((i, n) => {
-              const det = snap.details[i.id];
-              const tl = snap.timelines[i.id] ?? [];
-              const stages = buildStages(i.status, tl);
-              const rel = snap.releases?.find((r) => r.id === i.release_id);
-              const live = d.incidentActive && d.incident?.id === i.id;
-              const recovered = tl.find((e) => !e.rejected && e.type === 'recovery.verified');
-              return (
-                <li key={i.id} data-reveal style={{ ['--i' as string]: n }}>
-                  <Link to={`/incidents/${encodeURIComponent(i.id)}`} className="inc-link" data-cursor="Enter">
-                    <Tilt className={`card inc inc--${statusTone(i.status)}${live ? ' is-live' : ''}`} max={8}>
-                      <div className="inc__top">
-                        <Chip tone={statusTone(i.status)} pulse={live}>{statusWord(i.status)}</Chip>
-                        {live && <span className="inc__live">LIVE</span>}
-                        <span className="muted small">{dateTime(i.detected_at)} · {ago(i.detected_at, now)}</span>
-                      </div>
-                      <h3 className="inc__id">{i.id}</h3>
-                      <p className="inc__rel">release <b>{rel?.version ?? i.release_id}</b>{rel?.commit_sha && <> · <code>{rel.commit_sha}</code></>}</p>
-                      <ul className="inc__br">{i.breached_thresholds.length ? i.breached_thresholds.map((b) => <li key={b}>{b}</li>) : <li className="muted">no thresholds reported</li>}</ul>
-                      <MiniLoop stages={stages} />
-                      <p className="inc__foot muted small">
-                        {det ? `${det.recovery_attempts.length} recovery attempt${det.recovery_attempts.length === 1 ? '' : 's'}` : 'detail not loaded yet'}
-                        {recovered && <> · recovered in {dur(i.detected_at, recovered.at)}</>}
-                        {i.evidence_sha256 && <> · evidence sealed</>}
-                      </p>
-                      <span className="inc__go" aria-hidden="true">→</span>
-                    </Tilt>
-                  </Link>
-                </li>
-              );
-            })}
-          </ol>
-        )}
-      </section>
-    </div>
+      {snap.incidents === null ? <Empty title="Waiting for the incident list." /> : !list.length ? (
+        <Empty title={all.length ? 'No incidents match this filter.' : 'No incidents recorded.'}><span className="muted small">{all.length ? 'Pick another filter.' : 'The first regression the evaluator catches will appear here.'}</span></Empty>
+      ) : (
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Incident</th><th>Status</th><th>Release</th><th>Breached</th><th>Progress</th><th className="num">Duration</th></tr></thead>
+            <tbody>
+              {list.map((i) => {
+                const tl = snap.timelines[i.id] ?? [];
+                const rel = snap.releases?.find((r) => r.id === i.release_id);
+                const live = d.incidentActive && d.incident?.id === i.id;
+                const done = tl.find((e) => !e.rejected && e.type === 'recovery.verified');
+                const go = () => nav(`/incidents/${encodeURIComponent(i.id)}`);
+                return (
+                  <tr key={i.id} className="is-link" onClick={go}>
+                    <td><a href={`#/incidents/${encodeURIComponent(i.id)}`} onClick={(e) => { e.preventDefault(); go(); }} style={{ fontWeight: 500 }}>{i.id}</a><span className="sub">{dateTime(i.detected_at)} · {ago(i.detected_at, now)}</span></td>
+                    <td><Badge tone={statusTone(i.status)}>{statusWord(i.status)}</Badge>{live && <span className="sub">live</span>}</td>
+                    <td>{rel?.version ?? i.release_id}{rel?.commit_sha && <span className="sub mono">{rel.commit_sha.slice(0, 8)}</span>}</td>
+                    <td className="small">{i.breached_thresholds.length ? i.breached_thresholds.join('; ') : <span className="muted">none reported</span>}</td>
+                    <td><Mini stages={buildStages(i.status, tl)} /></td>
+                    <td className="num small">{done ? dur(i.detected_at, done.at) : isFailure(i.status) ? '—' : dur(i.detected_at, new Date(now).toISOString())}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
   );
 }

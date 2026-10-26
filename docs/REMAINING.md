@@ -1,10 +1,34 @@
 # What's left before submission
 
 Deadline: **Oct 27, 13:00 UTC (18:30 IST)**. Aim to submit Oct 26.
-Status as of Oct 23: the loop works **locally** end to end. A seeded bad commit was taken through signed events,
-the real backend, both gates and Mission Control, with one incident recovered and one blocked. Nothing has run on GitLab yet.
+Status as of Oct 26: the loop works **locally** end to end. A seeded bad commit was taken through signed events,
+the real backend, both gates and Mission Control, with one incident recovered and one blocked. No GitLab pipeline or Duo flow run is recorded in the repo yet.
 
-## Blocks submission
+## Final check (Oct 26, evening) — what still blocks submission
+
+All suites green on PR #21 (master + frontend redesign, Oct 27): 164 root tests, 163 backend, 7 app, ruff clean, frontend typechecks and builds,
+CI YAML parses and every script/flag it calls exists. Both gates re-run on the seeded fault: fix PROVEN + Integrity PASS;
+weakened-test repair blocked. Mission Control checked live against the backend (desktop + phone) and in demo mode.
+
+| # | Item | Owner | Status |
+|---|---|---|---|
+| 1 | **Public GitLab project** with the code, MIT licence and visible pipeline history (rule) | Team | Not done — code is on GitHub |
+| 2 | **One real pipeline run on GitLab**: evaluator FAIL on the seeded fault, then rollback + evidence | Kailash | Possible without cloud now: `SENTINEL_DEPLOY_MODE=local` (default, Krishna PR #18/#19) runs this commit's app next to the previous one and the real evaluator measures both; the pipeline fails on an unhealthy candidate (no deploy, no rollback). `cloudrun` mode does the full canary + rollback and needs `GCP_PROJECT_ID`, `GCP_REGION`, `GCP_SA_KEY`, `SENTINEL_BACKEND_URL`, `SENTINEL_HMAC_SECRET` |
+| 3 | **Duo flow run once on GitLab** (paste flow, "Pipeline: Failed" trigger, service account) | Samvit | Not done — flow + setup doc ready |
+| 4 | **Deploy** backend + demo app on Cloud Run; frontend hosted with `VITE_API_BASE`; backend `CORS_ORIGINS` set to the frontend URL | Kailash + Samvit | Not done |
+| 5 | **CI/CD variables**: `SENTINEL_HMAC_SECRET` (new value — the old one is public in git history), `SENTINEL_BACKEND_URL`, `GITLAB_PROJECT_TOKEN`; backend `GITLAB_PROJECT_ID`, `GITLAB_READ_TOKEN`, `GITLAB_WEBHOOK_SECRET` + MR/pipeline webhook | Team | Not done |
+| 6 | **Demo video** < 3 min on public YouTube, **Devpost text**, submit before **Oct 27 13:00 UTC (18:30 IST)** | Unassigned | Not done |
+
+Fallback if 2–4 don't land in time: record the video from the local loop (`backend/scripts/smoke_e2e.py`
+against a local backend, or the labelled `?demo` mode) and say plainly in the video and Devpost text which parts ran
+on GitLab and which ran locally.
+
+Done since Oct 24: backend truth gaps and analysis ingestion (Krishna), one incident id across jobs (Krishna),
+release identity by commit (Krishna, PR #16), CI variable syntax and default branch (Krishna/Kailash),
+public HMAC default removed from `.gitlab-ci.yml`, gate bypasses and fake merge/rollback removed (Samvit),
+SRE telemetry panels labelled as simulated, README with run steps, honest status note in `docs/verification.md`.
+
+## Earlier status table (Oct 23–26, kept for the record)
 
 | # | Item | Owner | Done when |
 |---|---|---|---|
