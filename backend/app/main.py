@@ -10,6 +10,7 @@ from app.routes.events import router as events_router
 from app.routes.health import router as health_router
 from app.routes.incidents import router as incidents_router
 from app.routes.releases import router as releases_router
+from app.routes.sre import router as sre_router
 from app.routes.state import router as state_router
 from app.routes.status import router as status_router
 from app.routes.webhooks import router as webhooks_router
@@ -78,6 +79,7 @@ app.include_router(status_router)
 app.include_router(incidents_router)
 app.include_router(releases_router)
 app.include_router(state_router)
+app.include_router(sre_router)
 
 
 
