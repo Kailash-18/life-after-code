@@ -92,7 +92,8 @@ def _fake_gcloud(tmp_path: Path, monkeypatch, describe_ok: bool = True, deploy_o
     bindir.mkdir()
     log = tmp_path / "calls.log"
     service = {"status": {"url": "https://svc.run.app",
-                          "traffic": [{"tag": "candidate", "url": "https://candidate---svc.run.app"}]}}
+                          "traffic": [{"revisionName": "svc-00001-old", "percent": 100},
+                                      {"tag": "candidate", "url": "https://candidate---svc.run.app"}]}}
     (tmp_path / "service.json").write_text(json.dumps(service))
     script = bindir / "gcloud"
     script.write_text(textwrap.dedent(f"""\
@@ -148,3 +149,4 @@ def test_confirmed_deploy_records_real_revision_and_traffic(tmp_path, monkeypatc
     assert sent and sent[0]["data"]["traffic_percent"] == 10
     env = (tmp_path / "artifacts" / "deploy.env").read_text()
     assert "CANDIDATE_URL=https://candidate---svc.run.app" in env and "STABLE_URL=https://svc.run.app" in env
+    assert "STABLE_REVISION=svc-00001-old" in env

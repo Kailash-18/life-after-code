@@ -109,6 +109,15 @@ def _tag_url(service: dict[str, Any] | None, tag: str) -> str | None:
     return None
 
 
+def _serving_revision(service: dict[str, Any] | None) -> str | None:
+    """The revision that currently gets most public traffic (the one to roll back to)."""
+    best = None
+    for entry in (service or {}).get("status", {}).get("traffic", []) or []:
+        if entry.get("revisionName") and entry.get("percent", 0) > (best or {}).get("percent", 0):
+            best = entry
+    return best["revisionName"] if best else None
+
+
 def deploy_candidate_revision(
     service_name: str,
     image_uri: str,
@@ -139,6 +148,7 @@ def deploy_candidate_revision(
             "tag": candidate_tag,
             "tag_url": candidate_tag_url,
             "stable_url": None,
+            "stable_revision": None,
             "traffic_percent": 0,
             "initial_release": False,
             "mode": "simulation",
@@ -180,6 +190,7 @@ def deploy_candidate_revision(
         "tag": candidate_tag,
         "tag_url": _tag_url(service, candidate_tag),
         "stable_url": stable_url,
+        "stable_revision": _serving_revision(existing),
         "traffic_percent": 100 if existing is None else 0,
         "initial_release": existing is None,
         "mode": "gcloud",
@@ -245,7 +256,8 @@ def _write_outputs(report: dict[str, Any]) -> None:
     lines = []
     for key, value in (("CANDIDATE_REVISION", report.get("candidate_revision")),
                        ("CANDIDATE_URL", report.get("candidate_tag_url")),
-                       ("STABLE_URL", report.get("stable_url"))):
+                       ("STABLE_URL", report.get("stable_url")),
+                       ("STABLE_REVISION", report.get("stable_revision"))):
         if value:
             lines.append(f"{key}={value}")
     (artifact_dir / "deploy.env").write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
@@ -283,6 +295,7 @@ def run_canary_deployment(
         "candidate_revision": rev_name,
         "candidate_tag_url": deploy_res.get("tag_url"),
         "stable_url": deploy_res.get("stable_url"),
+        "stable_revision": deploy_res.get("stable_revision"),
         "initial_traffic_percent": initial_traffic,
         "deploy_res": deploy_res,
         "success": bool(deploy_res.get("success")),
