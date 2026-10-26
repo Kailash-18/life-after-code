@@ -125,6 +125,16 @@ class SentinelRepository(ABC):
     def list_events_for_incident(self, incident_id: str) -> list[EventRecord]:
         """Fetch strictly chronological events related to an incident."""
 
+    @abstractmethod
+    def list_all_events(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        event_type: str | None = None,
+        incident_id: str | None = None,
+    ) -> list[EventRecord]:
+        """Fetch all chronological events from the ledger with optional filtering."""
+
     # -----------------------------------------------------------------------
     # Idempotency & Safety
     # -----------------------------------------------------------------------

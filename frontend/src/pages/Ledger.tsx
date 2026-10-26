@@ -53,7 +53,7 @@ export default function Ledger() {
     <div className="page">
       <PageHead num="04" kicker="Ledger · the record of record" title="Ledger">
         <p>Every event the CI jobs, scripts and the AI flow reported, with the job that reported it. If it is not in the ledger, Sentinel does not claim it happened.</p>
-        {source === 'live' && <p className="muted small">The API has no global event feed yet, so this merges the timelines of the 12 most recent incidents.</p>}
+        {source === 'live' && <p className="muted small">Chronological ledger queried live from <code>/api/v1/events</code>, backed by ACID persistence.</p>}
       </PageHead>
 
       <section className="sec sec--tight">

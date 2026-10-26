@@ -150,11 +150,21 @@ export function SentinelProvider({ children }: { children: ReactNode }) {
     let ids: string[] = [];
     const pollLists = async () => {
       try {
-        const [rel, inc] = await Promise.all([hit('releases', '/api/v1/releases?limit=50'), hit('incidents', '/api/v1/incidents')]);
+        const [rel, inc, evs] = await Promise.all([
+          hit('releases', '/api/v1/releases?limit=50'),
+          hit('incidents', '/api/v1/incidents'),
+          hit('events', '/api/v1/events?limit=100').catch(() => []),
+        ]);
         if (!alive) return;
         const incidents = toIncidents(inc);
+        const globalEvs = toTimeline(evs);
         ids = incidents.slice(0, 12).map((i) => i.id);
-        setSnap((s) => ({ ...s, releases: toReleases(rel), incidents }));
+        setSnap((s) => ({
+          ...s,
+          releases: toReleases(rel),
+          incidents,
+          events: globalEvs.length ? globalEvs : s.events,
+        }));
         if (!focusId && incidents[0]) focusId = incidents[0].id;
       } catch { /* status poll reports connectivity */ }
     };

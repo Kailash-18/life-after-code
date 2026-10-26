@@ -193,6 +193,25 @@ class InMemorySentinelRepository(SentinelRepository):
             matching.sort(key=lambda e: e.at)
             return [e.model_copy(deep=True) for e in matching]
 
+    def list_all_events(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        event_type: str | None = None,
+        incident_id: str | None = None,
+    ) -> list[EventRecord]:
+        with self._lock:
+            matching = [
+                e
+                for e in self.events
+                if (not event_type or e.type == event_type)
+                and (not incident_id or e.entity_id == incident_id or e.data.get("incident_id") == incident_id)
+            ]
+            matching.sort(key=lambda e: e.at)
+            start = max(0, offset)
+            end = start + max(1, min(limit, 500))
+            return [e.model_copy(deep=True) for e in matching[start:end]]
+
     # Idempotency
     def check_and_set_idempotency(self, key: str) -> bool:
         with self._lock:
