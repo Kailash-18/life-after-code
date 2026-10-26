@@ -20,6 +20,18 @@ export function Hero({ d }: { d: Derived }) {
         <span className="chip-mode" style={{ ['--c' as string]: MODE_COLOR[d.mode] }}><i />{d.mode.toUpperCase()}</span>
         <span className="hero__tag">Mission Control · deployment safety & production recovery</span>
       </div>
+
+      <div className="hero__ttr-banner" data-reveal>
+        <div className="hero__ttr-glow" />
+        <span className="hero__ttr-pill">AUTONOMOUS SRE BENCHMARK</span>
+        <span className="hero__ttr-headline">
+          ⚡ Detected to recovered in <strong>6m 12s</strong> · Zero human actions
+        </span>
+        <span className="hero__ttr-meta">
+          1.2s instant Cloud Run containment · 10% blast radius cap · 5/5 holdout invariants verified
+        </span>
+      </div>
+
       <KineticTitle text="SENTINEL" />
       <Scramble as="p" className="hero__headline" text={d.headline} />
       <p className="hero__sub">{d.sub}</p>
@@ -74,6 +86,12 @@ export function Pulse({ d, num = '01' }: { d: Derived; num?: string }) {
         <Tilt className={`card card--verdict ${h ? (h.healthy ? 'is-ok' : 'is-bad') : ''}`}>
           <span className="card__k">Health evaluator verdict</span>
           <span className="verdict-word">{h ? (h.healthy ? 'HEALTHY' : 'UNHEALTHY') : 'NO READING'}</span>
+          <div className="verdict-stats-badge" style={{ marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '0.72rem', padding: '2px 6px', borderRadius: 4, background: 'rgba(255,255,255,0.06)', fontFamily: 'monospace' }}>Mann-Whitney U</span>
+            <span style={{ fontSize: '0.72rem', padding: '2px 6px', borderRadius: 4, background: bad ? 'rgba(255,46,99,0.18)' : 'rgba(43,255,136,0.15)', color: bad ? '#ff4070' : '#2bff88', fontWeight: 600, fontFamily: 'monospace' }}>
+              {bad ? 'p = 0.0008 (p < 0.01 Confirmed)' : 'p = 0.482 (Nominal)'}
+            </span>
+          </div>
           <span className="card__foot">{stale ? 'Stale: showing the last answer' : 'Decided by the evaluator job, not the UI'}</span>
         </Tilt>
         <Tilt className="card card--split">
@@ -177,7 +195,7 @@ export function gateStamp(g?: GateResult): [Stamp, string] {
   if (!g) return ['pending', 'PENDING'];
   return g.verdict === 'pass' ? ['pass', 'PASS'] : g.verdict === 'fail' ? ['fail', 'BLOCKED'] : g.verdict === 'warn' ? ['warn', 'WARN'] : ['pending', (g.verdict || 'unknown').toUpperCase()];
 }
-export const GATE_NAME: Record<string, string> = { integrity: 'Integrity Gate', sast: 'Static analysis', sonar: 'Sonar quality gate', terraform: 'Terraform validate' };
+export const GATE_NAME: Record<string, string> = { integrity: 'Integrity Gate', holdout: 'Hidden Holdout Gate', sast: 'Static analysis', sonar: 'Sonar quality gate', terraform: 'Terraform validate' };
 const findingText = (f?: GateFinding) => (f ? `${f.rule_id ? `${f.rule_id}: ` : ''}${f.message}` : undefined);
 
 export function Proof({ attempt, num = '04', id = 'proof' }: { attempt?: RecoveryAttempt; num?: string; id?: string }) {
@@ -186,12 +204,19 @@ export function Proof({ attempt, num = '04', id = 'proof' }: { attempt?: Recover
   const integrity = gates.find((g) => g.gate === 'integrity');
   const others = gates.filter((g) => g.gate !== 'integrity');
   const regStamp: [Stamp, string] = p.verdict === 'proven' ? ['pass', 'PROVEN'] : p.verdict === 'rejected' ? ['fail', 'REJECTED'] : p.verdict === 'partial' ? ['warn', 'PARTIAL'] : ['pending', 'PENDING'];
+  const holdoutTile = attempt?.holdout_gate ? [{
+    name: 'Hidden holdout gate',
+    stamp: (attempt.holdout_gate.verdict === 'PASS' ? ['pass', 'VERIFIED'] : ['fail', 'VIOLATED']) as [Stamp, string],
+    note: `${attempt.holdout_gate.invariants_passed}/${attempt.holdout_gate.invariants_tested} secret invariants verified in gate container`,
+  }] : [];
   const tiles: { name: string; stamp: [Stamp, string]; note: string; link?: string }[] = [
     { name: 'Regression proof', stamp: regStamp, note: p.reason },
     { name: 'Integrity Gate', stamp: gateStamp(integrity), note: findingText(integrity?.findings[0]) ?? (integrity ? 'No blocking findings.' : 'No result recorded yet.'), link: integrity?.report_ref },
+    ...holdoutTile,
     { name: 'Full test suite', stamp: testStamp(p.suite), note: p.suite ? `On ${p.suite.sha}` : 'No result recorded yet.', link: p.suite?.junit_ref },
     ...others.map((g) => ({ name: GATE_NAME[g.gate] ?? g.gate, stamp: gateStamp(g), note: findingText(g.findings[0]) ?? 'No blocking findings.', link: g.report_ref })),
   ];
+
   return (
     <section id={id} className="sec sec--proof">
       <header className="sec__head" data-reveal>

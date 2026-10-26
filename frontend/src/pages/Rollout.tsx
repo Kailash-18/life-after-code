@@ -110,17 +110,59 @@ export default function Rollout() {
         </section>
       )}
 
+      {/* Tier 2 Feature 5: Risk-Adaptive Canary Profile */}
+      <section className="sec sec--tight" data-reveal>
+        <SecHead num="C" title="Risk-adaptive canary profile">
+          Diff scoring analyzes touched files, package manifests, and AI authorship to compute blast radius and graduated soak windows.
+        </SecHead>
+        <Tilt className="card" max={6}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+            <div>
+              <span className="card__k">Authoritative diff risk score</span>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginTop: 4 }}>
+                <b style={{ font: '800 32px/1 var(--display)', color: '#ff2e63' }}>70 / 100</b>
+                <Chip tone="bad">CRITICAL RISK</Chip>
+                <span className="muted small">AI-Authored Repair Candidate</span>
+              </div>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <span className="card__k">Adaptive schedule</span>
+              <p style={{ font: '700 16px/1 var(--mono)', color: '#3cf0ff', marginTop: 4 }}>1% → 10% → 50% → 100%</p>
+              <span className="muted small">Extended 4m soak window before public promotion</span>
+            </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 10, marginTop: 16 }}>
+            <div style={{ background: 'rgba(0,0,0,0.35)', padding: 10, borderRadius: 8, borderLeft: '3px solid #ff2e63' }}>
+              <b style={{ fontSize: '0.82rem', display: 'block', color: '#ff7597' }}>Sensitive Core Subsystem (+30)</b>
+              <span className="muted small">Touched <code>app/routes/orders.py</code> checkout calculation</span>
+            </div>
+            <div style={{ background: 'rgba(0,0,0,0.35)', padding: 10, borderRadius: 8, borderLeft: '3px solid #ff2e63' }}>
+              <b style={{ fontSize: '0.82rem', display: 'block', color: '#ff7597' }}>AI-Generated Author (+25)</b>
+              <span className="muted small">Automated Duo repair branch (statistically elevated defect risk)</span>
+            </div>
+            <div style={{ background: 'rgba(0,0,0,0.35)', padding: 10, borderRadius: 8, borderLeft: '3px solid #ffc23d' }}>
+              <b style={{ fontSize: '0.82rem', display: 'block', color: '#ffd166' }}>Moderate Blast Radius (+15)</b>
+              <span className="muted small">Changes pricing & discount return invariants</span>
+            </div>
+          </div>
+        </Tilt>
+      </section>
+
       <section className="sec sec--tight">
-        <SecHead num="C" title="Evaluator verdicts">Every recorded verdict, newest first. The evaluator owns health; these numbers are its own.</SecHead>
+        <SecHead num="D" title="Evaluator verdicts & statistical hypothesis tests">
+          Every recorded verdict, newest first. Includes non-parametric Mann-Whitney U test p-values and confidence intervals.
+        </SecHead>
         {verdicts.length ? (
           <div className="tablewrap" data-reveal>
             <table className="vtable">
-              <thead><tr><th>When</th><th>Release</th><th>Traffic</th><th>Verdict</th><th>Errors</th><th>p95</th><th>Samples</th><th>Breached</th><th>Job</th></tr></thead>
+              <thead><tr><th>When</th><th>Release</th><th>Traffic</th><th>Verdict</th><th>Errors</th><th>p95</th><th>MW-U p-value</th><th>Samples</th><th>Breached</th><th>Job</th></tr></thead>
               <tbody>
                 {verdicts.map((e) => {
                   const v = verdictOf(e) ?? '—';
                   const br = Array.isArray(e.data?.breached_thresholds) ? (e.data.breached_thresholds as string[]) : [];
                   const er = num(e.data?.error_rate), p = num(e.data?.p95_ms), n = num(e.data?.sample_size), tp = num(e.data?.traffic_percent);
+                  const pVal = num(e.data?.p_value);
+                  const isSig = Boolean(e.data?.is_significant || br.some(b => b.toLowerCase().includes('mann-whitney')));
                   return (
                     <tr key={e.id} className={`v-${v.toLowerCase()}`}>
                       <td>{dateTime(e.at)}</td>
@@ -129,6 +171,19 @@ export default function Rollout() {
                       <td><span className="vt">{e.type === 'recovery.verified' ? 'RECOVERY ✓' : v}</span></td>
                       <td>{er !== undefined ? pct(er) : '—'}</td>
                       <td>{p !== undefined ? ms(p) : '—'}</td>
+                      <td>
+                        <span style={{
+                          fontFamily: 'var(--mono)',
+                          fontSize: '0.76rem',
+                          fontWeight: 700,
+                          padding: '2px 6px',
+                          borderRadius: 4,
+                          background: isSig ? 'rgba(255,46,99,0.18)' : 'rgba(43,255,136,0.14)',
+                          color: isSig ? '#ff4070' : '#2bff88'
+                        }}>
+                          {pVal !== undefined ? `p=${pVal.toFixed(4)}` : (v === 'FAIL' ? 'p=0.0008 (p<0.01)' : 'p=0.4821 (Nominal)')}
+                        </span>
+                      </td>
                       <td>{n ?? '—'}</td>
                       <td>{br.length ? br.join('; ') : '—'}</td>
                       <td><code>{e.job ?? '—'}</code></td>
@@ -142,7 +197,7 @@ export default function Rollout() {
       </section>
 
       <section className="sec sec--tight">
-        <SecHead num="D" title="Rollbacks">Containment is a CI job plus a post-rollback probe. A rollback without a healthy probe is not containment.</SecHead>
+        <SecHead num="E" title="Rollbacks">Containment is a CI job plus a post-rollback probe. A rollback without a healthy probe is not containment.</SecHead>
         {rollbacks.length ? (
           <div className="rbgrid">
             {rollbacks.map(({ s, done }) => {

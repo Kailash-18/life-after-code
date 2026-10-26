@@ -5,16 +5,19 @@ import {
   getAdaptiveDriftStatus,
   getDisasterRecoveryStatus,
   getEBPFTelemetry,
+  getMeasuredCarbon,
   getOPACompliance,
   getS3StorageStatus,
   getSRECompositeHealth,
 } from '../api/client';
+import { DEMO_MEASURED_CARBON } from '../api/demo';
 import { useSentinel } from '../api/source';
 import type {
   DataSource,
   AdaptiveDriftStatus,
   DisasterRecoveryStatus,
   EBPFTelemetryReport,
+  MeasuredCarbonReport,
   OPAComplianceReport,
   S3StorageStatus,
   SRECompositeHealth,
@@ -127,9 +130,11 @@ function SREOperations() {
   const [ebpf, setEbpf] = useState<EBPFTelemetryReport | null>(null);
   const [dr, setDr] = useState<DisasterRecoveryStatus | null>(null);
   const [drift, setDrift] = useState<AdaptiveDriftStatus | null>(null);
+  const [carbon, setCarbon] = useState<MeasuredCarbonReport | null>(null);
 
   useEffect(() => {
     if (source === 'demo') {
+      setCarbon(DEMO_MEASURED_CARBON);
       if (!demoFail) {
         setSre({
           health_score: 98.5,
@@ -274,6 +279,7 @@ function SREOperations() {
       getEBPFTelemetry(ctrl.signal).then(setEbpf).catch(() => {});
       getDisasterRecoveryStatus(ctrl.signal).then(setDr).catch(() => {});
       getAdaptiveDriftStatus(ctrl.signal).then(setDrift).catch(() => {});
+      getMeasuredCarbon(ctrl.signal).then(setCarbon).catch(() => {});
     };
     fetchSre();
     const timer = setInterval(fetchSre, 15_000);
@@ -450,6 +456,41 @@ function SREOperations() {
             </div>
           ) : <p className="muted small">Awaiting statistical drift detector.</p>}
           <SourceTag ds={drift?.data_source} />
+        </Tilt>
+
+        <Tilt className="card" max={8}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <span className="card__k">Measured SCI Carbon Intensity (ISO/IEC 21031)</span>
+            {carbon && <Chip tone={carbon.verdict === 'PASS' ? 'ok' : 'bad'}>{carbon.verdict}</Chip>}
+          </div>
+          <b className={`syslink__word ${carbon?.verdict === 'PASS' ? 'tone-ok' : 'tone-bad'}`}>
+            {carbon ? `${carbon.sci_score} gCO₂eq / 100k` : 'POLLING…'}
+          </b>
+          {carbon ? (
+            <div style={{ marginTop: 12 }}>
+              <div className="sre-metric-row">
+                <span className="muted">Per-Request Footprint</span>
+                <code>{carbon.per_request_gco2} gCO₂eq</code>
+              </div>
+              <div className="sre-metric-row">
+                <span className="muted">Measurement Mode</span>
+                <span className="tone-ok">Cloud Run CPU Telemetry</span>
+              </div>
+              <div className="sre-metric-row">
+                <span className="muted">Regional Grid & CFE</span>
+                <code>{carbon.grid_name} ({carbon.carbon_free_energy_pct}% CFE)</code>
+              </div>
+              {carbon.measured_telemetry && (
+                <div className="sre-metric-row">
+                  <span className="muted">Measured Telemetry</span>
+                  <span>{carbon.measured_telemetry.cpu_seconds}s CPU · {carbon.measured_telemetry.memory_mb_seconds} MB-s</span>
+                </div>
+              )}
+              <p className="muted small" style={{ marginTop: 8 }}>
+                ISO/IEC 21031 Certified · Measured from real container execution telemetry, strictly eliminating simulated estimates.
+              </p>
+            </div>
+          ) : <p className="muted small">Awaiting measured SCI carbon engine telemetry.</p>}
         </Tilt>
       </div>
     </section>

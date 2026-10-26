@@ -24,20 +24,151 @@ if str(PROJECT_ROOT) not in sys.path:
 from sentinel.scripts.emit_event import emit_event
 
 
-def get_deployment_strategies_catalog() -> dict[str, Any]:
-    """Returns the comprehensive taxonomy of deployment options and the authoritative recommendation."""
+def score_diff_risk(
+    diff_text: str = "",
+    changed_files: list[str] | None = None,
+    author: str = "",
+    branch: str = "",
+) -> dict[str, Any]:
+    """
+    Tier 2 Feature: Risk-Adaptive Canary Diff Scorer.
+    Scores each diff deterministically based on sensitive files, diff size,
+    dependency bumps, and AI authorship.
+    Rolls out risky changes more slowly:
+      1% -> 10% -> 50% -> 100% with longer observation waits.
+    """
+    files = [f.strip().replace("\\", "/") for f in (changed_files or [])]
+    if not files and diff_text:
+        import re
+        files = re.findall(r"^diff --git a/(.*?) b/", diff_text, flags=re.MULTILINE)
+
+    risk_score = 0
+    risk_factors: list[dict[str, Any]] = []
+
+    # 1. Sensitive Files (Auth, Payments, Routes, Database, CI)
+    sensitive_keywords = ["auth", "security", "order", "payment", "token", "secret", "crypto", "config", "db", ".gitlab-ci.yml"]
+    matched_sensitive = [f for f in files if any(k in f.lower() for k in sensitive_keywords)]
+    if matched_sensitive:
+        pts = min(len(matched_sensitive) * 15, 30)
+        risk_score += pts
+        risk_factors.append({
+            "factor": "Sensitive Core Subsystems Modified",
+            "points": pts,
+            "details": f"{len(matched_sensitive)} critical file(s) touched: {matched_sensitive[:3]}",
+        })
+
+    # 2. Dependency / Infrastructure Bumps
+    dependency_files = [f for f in files if any(f.endswith(d) for d in ["requirements.txt", "pyproject.toml", "package.json", "Dockerfile"])]
+    if dependency_files:
+        risk_score += 20
+        risk_factors.append({
+            "factor": "Dependency / Runtime Bumps",
+            "points": 20,
+            "details": f"Package manifests altered: {dependency_files}",
+        })
+
+    # 3. Diff Size & Blast Radius
+    line_count = len(diff_text.splitlines()) if diff_text else 0
+    if line_count > 200:
+        risk_score += 25
+        risk_factors.append({
+            "factor": "Large Blast Radius Diff",
+            "points": 25,
+            "details": f"Diff contains {line_count} changed lines (>200 lines threshold).",
+        })
+    elif line_count > 80:
+        risk_score += 15
+        risk_factors.append({
+            "factor": "Moderate Blast Radius Diff",
+            "points": 15,
+            "details": f"Diff contains {line_count} changed lines (>80 lines threshold).",
+        })
+
+    # 4. AI-Written Author or Repair Branch
+    author_lower = author.lower()
+    branch_lower = branch.lower()
+    is_ai_authored = any(k in author_lower or k in branch_lower for k in ["duo", "ai", "repair", "bot", "sentinel-flow"])
+    if is_ai_authored:
+        risk_score += 25
+        risk_factors.append({
+            "factor": "AI-Generated Repair Candidate",
+            "points": 25,
+            "details": f"Author/branch '{author or branch}' identified as automated AI generation (statistically higher defect rate).",
+        })
+
+    # Clamp risk score
+    risk_score = min(100, max(0, risk_score))
+
+    # Determine risk tier and adaptive canary rollout schedule
+    if risk_score >= 60:
+        tier = "CRITICAL_RISK"
+        steps = [
+            {"traffic_percent": 1, "wait_seconds": 120, "evaluator_required": True, "description": "1% private tag synthetic canary"},
+            {"traffic_percent": 10, "wait_seconds": 240, "evaluator_required": True, "description": "10% cautious blast radius limit"},
+            {"traffic_percent": 50, "wait_seconds": 300, "evaluator_required": True, "description": "50% mid-tier progressive validation"},
+            {"traffic_percent": 100, "wait_seconds": 0, "evaluator_required": True, "description": "100% full production promotion"},
+        ]
+        rationale = "High-risk or AI-authored diff: strict graduated rollout (1% -> 10% -> 50% -> 100%) with extended soak windows."
+    elif risk_score >= 30:
+        tier = "MEDIUM_RISK"
+        steps = [
+            {"traffic_percent": 5, "wait_seconds": 60, "evaluator_required": True, "description": "5% initial canary exposure"},
+            {"traffic_percent": 25, "wait_seconds": 120, "evaluator_required": True, "description": "25% quarter-traffic observation"},
+            {"traffic_percent": 50, "wait_seconds": 180, "evaluator_required": True, "description": "50% half-split evaluation"},
+            {"traffic_percent": 100, "wait_seconds": 0, "evaluator_required": True, "description": "100% full production promotion"},
+        ]
+        rationale = "Medium risk: balanced progressive schedule (5% -> 25% -> 50% -> 100%)."
+    else:
+        tier = "LOW_RISK"
+        steps = [
+            {"traffic_percent": 10, "wait_seconds": 30, "evaluator_required": True, "description": "10% fast-track canary"},
+            {"traffic_percent": 50, "wait_seconds": 60, "evaluator_required": True, "description": "50% standard split"},
+            {"traffic_percent": 100, "wait_seconds": 0, "evaluator_required": True, "description": "100% full production promotion"},
+        ]
+        rationale = "Low risk: fast-track canary schedule (10% -> 50% -> 100%)."
+
     return {
-        "recommended_strategy": "canary_progressive",
-        "rationale": (
+        "risk_score": risk_score,
+        "max_risk": 100,
+        "risk_tier": tier,
+        "is_ai_authored": is_ai_authored,
+        "risk_factors": risk_factors,
+        "adaptive_rollout_steps": steps,
+        "rollout_steps_summary": " -> ".join(f"{s['traffic_percent']}%" for s in steps),
+        "rationale": rationale,
+    }
+
+
+def get_deployment_strategies_catalog(diff_risk: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Returns the comprehensive taxonomy of deployment options updated with real diff risk scoring."""
+    is_adaptive = diff_risk is not None
+    risk = diff_risk or score_diff_risk()
+    recommended = "risk_adaptive_canary" if is_adaptive else "canary_progressive"
+
+    return {
+        "recommended_strategy": recommended,
+        "diff_risk": risk,
+        "rationale": risk["rationale"] if is_adaptive else (
             "Progressive Canary with private tag isolation is strongly recommended. "
             "It guarantees 0% user traffic during initial synthetic health probes, "
             "strictly caps blast radius at 10% during early public release, and enables "
             "instant sub-second Cloud Run traffic rollback if any threshold is breached."
         ),
         "strategies": {
+            "risk_adaptive_canary": {
+                "name": "Risk-Adaptive Progressive Canary (Diff-Scored)",
+                "recommended": is_adaptive,
+                "risk_tier": risk["risk_tier"],
+                "blast_radius": f"Starts at {risk['adaptive_rollout_steps'][0]['traffic_percent']}% traffic",
+                "rollout_steps": risk["rollout_steps_summary"],
+                "rollback_speed_seconds": 1.5,
+                "zero_downtime": True,
+                "cost_overhead": "Low",
+                "description": f"Diff risk score {risk['risk_score']}/100 [{risk['risk_tier']}]. Rolls out {risk['rollout_steps_summary']} with extended observation windows for AI repairs.",
+            },
             "canary_progressive": {
                 "name": "Progressive Canary Rollout (Tag-Isolated)",
-                "recommended": True,
+                "recommended": not is_adaptive,
                 "blast_radius": "0% (tag probe) -> 10% initial public",
                 "rollback_speed_seconds": 1.5,
                 "zero_downtime": True,
@@ -116,7 +247,6 @@ def _serving_revision(service: dict[str, Any] | None) -> str | None:
         if entry.get("revisionName") and entry.get("percent", 0) > (best or {}).get("percent", 0):
             best = entry
     return best["revisionName"] if best else None
-
 
 def deploy_candidate_revision(
     service_name: str,
@@ -232,8 +362,11 @@ def adjust_canary_traffic(
     return {"success": True, "output": res.stdout, "mode": "gcloud"}
 
 
-def _emit_canary_started(rev_name, traffic_percent, pipeline_id, job_id, commit_sha, release_id) -> None:
+def _emit_canary_started(rev_name, traffic_percent, pipeline_id, job_id, commit_sha, release_id, diff_risk=None) -> None:
     try:
+        data = {"revision_name": rev_name, "traffic_percent": traffic_percent, "target": "candidate"}
+        if diff_risk:
+            data["diff_risk"] = diff_risk
         emit_event(
             event_type="deploy.canary_started",
             source="sentinel-canary-deploy:automated",
@@ -241,7 +374,7 @@ def _emit_canary_started(rev_name, traffic_percent, pipeline_id, job_id, commit_
             job_id=job_id,
             commit_sha=commit_sha,
             release_id=release_id,
-            data={"revision_name": rev_name, "traffic_percent": traffic_percent, "target": "candidate"},
+            data=data,
         )
     except Exception as e:
         print(f"[!] Warning: could not emit deploy.canary_started: {e}", file=sys.stderr)
@@ -288,6 +421,13 @@ def run_canary_deployment(
         commit_sha=commit_sha,
     )
     rev_name = deploy_res.get("revision_name")
+
+    # Compute risk score for diff
+    diff_risk = score_diff_risk(
+        author=os.environ.get("GITLAB_USER_LOGIN", "ai-flow"),
+        branch=os.environ.get("CI_COMMIT_REF_NAME", "duo/fix"),
+    )
+
     report: dict[str, Any] = {
         "timestamp": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "service": service_name,
@@ -296,7 +436,8 @@ def run_canary_deployment(
         "candidate_tag_url": deploy_res.get("tag_url"),
         "stable_url": deploy_res.get("stable_url"),
         "stable_revision": deploy_res.get("stable_revision"),
-        "initial_traffic_percent": initial_traffic,
+        "initial_traffic_percent": initial_traffic or diff_risk["adaptive_rollout_steps"][0]["traffic_percent"],
+        "diff_risk": diff_risk,
         "deploy_res": deploy_res,
         "success": bool(deploy_res.get("success")),
     }
@@ -319,7 +460,7 @@ def run_canary_deployment(
 
     # Recorded only after gcloud confirmed the deploy (and the traffic step, if any).
     if emit_to_backend:
-        _emit_canary_started(rev_name, traffic, pipeline_id, job_id, commit_sha, release_id)
+        _emit_canary_started(rev_name, traffic, pipeline_id, job_id, commit_sha, release_id, diff_risk=diff_risk)
 
     _write_outputs(report)
 
