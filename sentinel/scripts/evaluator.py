@@ -393,6 +393,15 @@ def run_evaluation(
 
     # 5. Emit Evaluator Verdict to Backend
     if emit_to_backend:
+        hyp = composite_health.get("hypothesis_testing", {})
+        u_stat = hyp.get("u_statistic", 0.0)
+        z_score = hyp.get("z_score", 0.0)
+        p_val = hyp.get("p_value", 1.0)
+        is_sig = hyp.get("is_significant", False)
+        stat_verdict = (
+            f"Mann-Whitney U={u_stat:.1f}, Z={z_score:.2f}, p={p_val:.4f} "
+            f"({'Statistically significant regression with 95%+ confidence' if is_sig else 'Within normal statistical latency variance'})"
+        )
         try:
             emit_event(
                 event_type="evaluator.verdict",
@@ -412,6 +421,12 @@ def run_evaluation(
                     "traffic_percent": traffic_percent,
                     "revision_name": revision_name,
                     "breached_thresholds": breached_thresholds,
+                    "composite_health": composite_health,
+                    "hypothesis_testing": hyp,
+                    "statistical_verdict": stat_verdict,
+                    "p_value": p_val,
+                    "u_statistic": u_stat,
+                    "is_significant": is_sig,
                 },
             )
         except Exception as e:
