@@ -33,7 +33,7 @@ target_app_max_instances = 5
 backend_cpu           = "1000m"
 backend_memory        = "512Mi"
 backend_min_instances = 1
-backend_max_instances = 3
+backend_max_instances = 1
 
 # 6. Global Anycast Networking & Multi-Region Mesh
 backend_timeout_sec = 30

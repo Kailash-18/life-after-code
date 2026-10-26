@@ -167,9 +167,9 @@ variable "backend_min_instances" {
 }
 
 variable "backend_max_instances" {
-  description = "Maximum scaling instances for Sentinel backend"
+  description = "Maximum scaling instances for Sentinel backend (strictly 1 for SQLite single-writer consistency)"
   type        = number
-  default     = 3
+  default     = 1
 }
 
 # --- Networking, Load Balancer & DNS ---
