@@ -11,6 +11,7 @@ import {
 } from '../api/client';
 import { useSentinel } from '../api/source';
 import type {
+  DataSource,
   AdaptiveDriftStatus,
   DisasterRecoveryStatus,
   EBPFTelemetryReport,
@@ -99,6 +100,23 @@ function StateStorage() {
       )}
       <p className="muted small">Read-only. Rollbacks and traffic changes happen only through CI jobs.</p>
     </Tilt>
+  );
+}
+
+const SOURCE_LABEL: Record<DataSource['kind'], string> = {
+  measured: 'Measured',
+  derived: 'Derived from a measurement',
+  reference: 'Reference input',
+  simulated: 'Simulated',
+};
+
+/** States where a panel's numbers come from, so simulated values are never read as telemetry. */
+function SourceTag({ ds }: { ds?: DataSource }) {
+  if (!ds) return null;
+  return (
+    <p className="muted small" style={{ marginTop: 8 }}>
+      <Chip tone={ds.kind === 'measured' ? 'ok' : 'warn'}>{SOURCE_LABEL[ds.kind] ?? ds.kind}</Chip> {ds.note}
+    </p>
   );
 }
 
@@ -274,9 +292,11 @@ function SREOperations() {
             {sre && <Chip tone={sre.status === 'PASS' ? 'ok' : sre.status === 'WARN' ? 'warn' : 'bad'}>{sre.status}</Chip>}
           </div>
           <b className={`syslink__word ${sre?.status === 'PASS' ? 'tone-ok' : sre?.status === 'WARN' ? 'tone-warn' : 'tone-bad'}`}>
-            {sre ? `${sre.health_score} / 100` : 'POLLING…'}
+            {sre ? (sre.health_score === null ? 'NO DATA' : `${sre.health_score} / 100`) : 'POLLING…'}
           </b>
-          {sre ? (
+          {sre && (!sre.error_budget || !sre.hypothesis_testing) ? (
+            <p className="muted small" style={{ marginTop: 12 }}>No evaluator measurement recorded yet, so there is nothing to score.</p>
+          ) : sre && sre.error_budget && sre.hypothesis_testing ? (
             <div style={{ marginTop: 12 }}>
               <div className="sre-metric-row">
                 <span className="muted">Burn Rate</span>
@@ -299,6 +319,7 @@ function SREOperations() {
               <p className="muted small" style={{ marginTop: 8 }}>{sre.error_budget.recommended_action ?? sre.hypothesis_testing.interpretation}</p>
             </div>
           ) : <p className="muted small">Awaiting statistical evaluator response.</p>}
+          <SourceTag ds={sre?.data_source} />
         </Tilt>
 
         <Tilt className="card" max={8}>
@@ -323,17 +344,14 @@ function SREOperations() {
                 <span className="muted">Violations</span>
                 <span className={opa.violations_count > 0 ? 'tone-bad' : 'tone-ok'}>{opa.violations_count} detected</span>
               </div>
-              <div className="sre-metric-row">
-                <span className="muted">Supply Chain & SLSA</span>
-                <span>SLSA Level 3 Certified</span>
-              </div>
               <p className="muted small" style={{ marginTop: 8 }}>
                 {opa.allow
-                  ? 'Zero-Trust: Non-root execution, read-only rootfs, Cloud Armor L7 WAF, and blast radius <= 10% verified.'
+                  ? 'Every policy in the package passed for the evaluated manifest.'
                   : `Blocked by Policy Gate: ${opa.violations[0] ?? 'Rule violations present'}`}
               </p>
             </div>
           ) : <p className="muted small">Awaiting OPA Rego policy engine response.</p>}
+          <SourceTag ds={opa?.data_source} />
         </Tilt>
 
         <Tilt className="card" max={8}>
@@ -370,6 +388,7 @@ function SREOperations() {
               </div>
             </div>
           ) : <p className="muted small">Awaiting eBPF socket lifecycle probe.</p>}
+          <SourceTag ds={ebpf?.data_source} />
         </Tilt>
 
         <Tilt className="card" max={8}>
@@ -394,13 +413,9 @@ function SREOperations() {
                 <span className="muted">Data Loss (RPO)</span>
                 <code>{dr.rpo_seconds}s (Transactional)</code>
               </div>
-              <div className="sre-metric-row">
-                <span className="muted">Routing Layer</span>
-                <span>Anycast BGP + Cloud Run NEGs</span>
-              </div>
-              <p className="muted small" style={{ marginTop: 8 }}>Cross-region state replication active. Sub-5s automatic failover armed.</p>
             </div>
           ) : <p className="muted small">Awaiting DR orchestrator status.</p>}
+          <SourceTag ds={dr?.data_source} />
         </Tilt>
 
         <Tilt className="card" max={8}>
@@ -409,7 +424,7 @@ function SREOperations() {
             {drift && <Chip tone={drift.drift_detected ? 'bad' : 'ok'}>{drift.status}</Chip>}
           </div>
           <b className={`syslink__word ${drift?.drift_detected ? 'tone-bad' : 'tone-ok'}`}>
-            {drift ? `${drift.current_ewma}ms EWMA` : 'POLLING…'}
+            {drift ? (drift.current_ewma === null ? 'NO DATA' : `${drift.current_ewma}ms EWMA`) : 'POLLING…'}
           </b>
           {drift ? (
             <div style={{ marginTop: 12 }}>
@@ -434,6 +449,7 @@ function SREOperations() {
               <p className="muted small" style={{ marginTop: 8 }}>{drift.action}</p>
             </div>
           ) : <p className="muted small">Awaiting statistical drift detector.</p>}
+          <SourceTag ds={drift?.data_source} />
         </Tilt>
       </div>
     </section>

@@ -83,7 +83,7 @@ def test_missing_signature_rejected(client, hmac_secret):
 
 def test_invalid_signature_wrong_secret(client):
     payload = _valid_payload(job_id="103")
-    res = _make_signed_request(client, payload, secret="wrong-secret-key")
+    res = _make_signed_request(client, payload, secret="wrong-secret-key")  # sast: allow-public-placeholder
     assert res.status_code == 401
     assert res.json()["detail"]["error"]["code"] == "INVALID_SIGNATURE"
 

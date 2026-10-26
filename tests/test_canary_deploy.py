@@ -76,3 +76,77 @@ def test_run_canary_deployment_writes_artifact(tmp_path: Path, monkeypatch):
     assert artifact_file.exists()
     saved = json.loads(artifact_file.read_text(encoding="utf-8"))
     assert saved["release_id"] == "rel-test-001"
+
+
+# --- real (non-simulated) path: never record a deploy gcloud did not confirm -------------
+
+import os
+import sys
+import textwrap
+
+from sentinel.scripts import canary_deploy as cd
+
+
+def _fake_gcloud(tmp_path: Path, monkeypatch, describe_ok: bool = True, deploy_ok: bool = True):
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    log = tmp_path / "calls.log"
+    service = {"status": {"url": "https://svc.run.app",
+                          "traffic": [{"revisionName": "svc-00001-old", "percent": 100},
+                                      {"tag": "candidate", "url": "https://candidate---svc.run.app"}]}}
+    (tmp_path / "service.json").write_text(json.dumps(service))
+    script = bindir / "gcloud"
+    script.write_text(textwrap.dedent(f"""\
+        #!/bin/sh
+        echo "$@" >> "{log}"
+        case "$*" in
+          *"services describe"*) {"cat " + str(tmp_path / "service.json") if describe_ok else "exit 1"} ;;
+          *"run deploy"*) {"echo '{{}}'" if deploy_ok else "echo 'permission denied' >&2; exit 1"} ;;
+          *) echo '{{}}' ;;
+        esac
+        """))
+    script.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
+    return log
+
+
+pytestmark_posix = pytest.mark.skipif(sys.platform == "win32", reason="uses a POSIX shell stand-in for gcloud")
+
+
+def test_missing_gcloud_is_a_failure_and_emits_nothing(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PATH", str(tmp_path))  # no gcloud anywhere
+    sent = []
+    monkeypatch.setattr(cd, "emit_event", lambda **kw: sent.append(kw))
+    report = cd.run_canary_deployment("svc", "img:1", "rel-x", initial_traffic=10, commit_sha="a" * 40)
+    assert report["success"] is False
+    assert sent == []
+
+
+@pytestmark_posix
+def test_failed_deploy_is_a_failure_and_emits_nothing(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _fake_gcloud(tmp_path, monkeypatch, deploy_ok=False)
+    sent = []
+    monkeypatch.setattr(cd, "emit_event", lambda **kw: sent.append(kw))
+    report = cd.run_canary_deployment("svc", "img:1", "rel-x", initial_traffic=10, commit_sha="a" * 40)
+    assert report["success"] is False and sent == []
+
+
+@pytestmark_posix
+def test_confirmed_deploy_records_real_revision_and_traffic(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    log = _fake_gcloud(tmp_path, monkeypatch)
+    sent = []
+    monkeypatch.setattr(cd, "emit_event", lambda **kw: sent.append(kw))
+    report = cd.run_canary_deployment("svc", "img:1", "rel-x", initial_traffic=10, commit_sha="abcdef1234" + "0" * 30)
+    assert report["success"] is True
+    assert report["candidate_revision"].startswith("svc-cabcdef1-")
+    assert report["candidate_tag_url"] == "https://candidate---svc.run.app"
+    assert report["traffic_percent"] == 10
+    calls = log.read_text()
+    assert "--no-traffic" in calls and "--to-tags=candidate=10" in calls
+    assert sent and sent[0]["data"]["traffic_percent"] == 10
+    env = (tmp_path / "artifacts" / "deploy.env").read_text()
+    assert "CANDIDATE_URL=https://candidate---svc.run.app" in env and "STABLE_URL=https://svc.run.app" in env
+    assert "STABLE_REVISION=svc-00001-old" in env

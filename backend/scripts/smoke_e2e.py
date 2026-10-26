@@ -21,12 +21,12 @@ import urllib.error
 import urllib.request
 from datetime import UTC, datetime
 
-API = os.environ.get("SENTINEL_API_URL", "http://localhost:8000").rstrip("/")
+API = os.environ.get("SENTINEL_API_URL", "http://127.0.0.1:8000").rstrip("/")
 SECRET = os.environ.get("SENTINEL_HMAC_SECRET", "sentinel-dev-secret-key-change-in-prod")
 RUN = str(int(time.time()))
 INC = f"inc-smoke-{RUN}"
 BROKEN = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
-FIX = "f00dfeed" + RUN.rjust(32, "0")
+FIX = ("f" + RUN).ljust(40, "0")  # unique first 12 chars per run (releases are keyed by sha[:12])
 _job = int(RUN) * 100
 
 
@@ -93,7 +93,8 @@ def main():
          artifact_url="https://gitlab.com/example/-/jobs/1/artifacts/evidence.tar.gz")
     # If the server dispatches flows itself it may already be INVESTIGATING.
     code, inc = _request("GET", f"/api/v1/incidents/{INC}")
-    if inc.get("status") == "EVIDENCE_COLLECTED":
+    check("GET incident detail", code == 200 and isinstance(inc, dict) and "status" in inc, f"{code} {inc}")
+    if not isinstance(inc, dict) or inc.get("status") in (None, "EVIDENCE_COLLECTED"):
         step("flow.started", "INVESTIGATING", data={"flow_session_id": f"smoke-{RUN}"})
     step("repair.proposed", "REPAIR_PROPOSED", data={"mr_iid": 1, "fix_sha": FIX})
     step("regression_proof.verdict", "VERIFYING", sha=FIX, data={
@@ -110,10 +111,14 @@ def main():
                "error_rate": 0.001, "p95_ms": 35.0, "sample_size": 600})
 
     code, timeline = _request("GET", f"/api/v1/incidents/{INC}/timeline")
-    types = [e["type"] for e in timeline] if code == 200 else []
+    if code != 200 or not isinstance(timeline, list):
+        check("GET incident timeline", False, f"{code} {timeline}")
+        timeline = []
+    types = [e.get("type") for e in timeline if isinstance(e, dict)]
     check("timeline ordered from detection to recovery",
-          types[:1] == ["incident.detected"] and types[-1] == "recovery.verified", str(types))
-    check("refused events visible in timeline", sum(1 for e in timeline if e.get("rejected")) >= 1)
+          types[:1] == ["incident.detected"] and types[-1:] == ["recovery.verified"], str(types))
+    check("refused events visible in timeline",
+          sum(1 for e in timeline if isinstance(e, dict) and e.get("rejected")) >= 1)
 
     code, status = _request("GET", "/api/v1/status")
     cur = (status or {}).get("current_release") or {}
@@ -122,7 +127,8 @@ def main():
     check("/status health is measured", status["system_health"]["error_rate"] == 0.001,
           str(status.get("system_health")))
 
-    print(f"\n{len(failures)} failure(s)")
+    print(f"\nincident: {INC}  ({API}/api/v1/incidents/{INC})")
+    print(f"{len(failures)} failure(s)")
     return 1 if failures else 0
 
 
