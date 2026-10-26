@@ -331,6 +331,26 @@ paths:
         '404':
           $ref: '#/components/responses/ErrorResponse'
 
+  /api/v1/incidents/{id}/postmortem:
+    get:
+      summary: Autonomous Incident Postmortem Report
+      description: Generates an authoritative GitLab postmortem MR / Issue markdown report with root cause analysis and evidence hashes.
+      operationId: getIncidentPostmortem
+      tags: [incidents]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Auto-generated postmortem markdown and metadata bundle
+          content:
+            application/json:
+              schema:
+                type: object
+
   /api/v1/state/storage:
     get:
       summary: State snapshot storage status (Kailash, S3 state store)
@@ -598,6 +618,207 @@ paths:
             application/json:
               schema:
                 type: object
+
+  /api/v1/sre/saboteur:
+    get:
+      summary: Saboteur Adversarial Agent vs Integrity Gate
+      description: Demonstrates live adversarial LLM evasion attempts and deterministic gate deterrence.
+      operationId: getSaboteurArena
+      tags: [sre]
+      parameters:
+        - in: query
+          name: strategy
+          schema:
+            type: string
+            default: all
+      responses:
+        '200':
+          description: Saboteur deterrence report
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /api/v1/sre/candidates:
+    get:
+      summary: Multi-Candidate Repair Filter and Selection
+      description: Returns multi-candidate fixes evaluated through deterministic gates with explicit rejection reasons.
+      operationId: getCandidateFixes
+      tags: [sre]
+      responses:
+        '200':
+          description: Multi-candidate evaluation report
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /api/v1/sre/trust-score:
+    get:
+      summary: Deterministic Repair Trust Scorer
+      description: Calculates a deterministic 0-100 score built from gate results, test coverage change, and diff size.
+      operationId: getRepairTrustScore
+      tags: [sre]
+      parameters:
+        - in: query
+          name: blocking_findings
+          schema:
+            type: integer
+            default: 0
+        - in: query
+          name: warning_findings
+          schema:
+            type: integer
+            default: 0
+        - in: query
+          name: regression_proven
+          schema:
+            type: boolean
+            default: true
+        - in: query
+          name: holdout_passed
+          schema:
+            type: boolean
+            default: true
+        - in: query
+          name: added_lines
+          schema:
+            type: integer
+            default: 6
+        - in: query
+          name: deleted_lines
+          schema:
+            type: integer
+            default: 2
+        - in: query
+          name: coverage_delta
+          schema:
+            type: number
+            default: 0.8
+      responses:
+        '200':
+          description: Deterministic trust score report
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /api/v1/sre/holdout:
+    get:
+      summary: Hidden Holdout Tests Invariant Verification
+      description: Executes secret holdout test invariants strictly inside the isolated gate environment.
+      operationId: getHoldoutGateStatus
+      tags: [sre]
+      parameters:
+        - in: query
+          name: candidate_sha
+          schema:
+            type: string
+            default: HEAD
+      responses:
+        '200':
+          description: Holdout gate report
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /api/v1/sre/diff-risk:
+    get:
+      summary: Risk-Adaptive Canary Diff Scorer
+      description: Scores diffs deterministically based on sensitive files, size, dependency bumps, and AI authorship.
+      operationId: getCanaryDiffRisk
+      tags: [sre]
+      parameters:
+        - in: query
+          name: diff_text
+          schema:
+            type: string
+            default: ""
+        - in: query
+          name: author
+          schema:
+            type: string
+            default: "gitlab-duo-flow"
+        - in: query
+          name: branch
+          schema:
+            type: string
+            default: "duo/repair-candidate"
+      responses:
+        '200':
+          description: Diff risk assessment and deployment catalog
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /api/v1/sre/shadow-replay:
+    get:
+      summary: Shadow Traffic Replay Verification
+      description: Replays failing incident traffic against candidate revision with zero live user impact.
+      operationId: getShadowTrafficReplay
+      tags: [sre]
+      parameters:
+        - in: query
+          name: incident_id
+          schema:
+            type: string
+            default: "inc-demo-003"
+        - in: query
+          name: candidate_rev
+          schema:
+            type: string
+            default: "sentinel-target-app-cand-fix-002"
+        - in: query
+          name: samples
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Shadow traffic replay verification report
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /api/v1/sre/carbon:
+    get:
+      summary: Measured Software Carbon Intensity (ISO/IEC 21031)
+      description: Evaluates ISO/IEC 21031 SCI using measured Cloud Run container vCPU-seconds and memory metrics.
+      operationId: getMeasuredCarbonIntensity
+      tags: [sre]
+      parameters:
+        - in: query
+          name: service_name
+          schema:
+            type: string
+            default: "sentinel-target-app"
+        - in: query
+          name: region
+          schema:
+            type: string
+            default: "us-central1"
+        - in: query
+          name: cpu_seconds
+          schema:
+            type: number
+            default: 4.25
+        - in: query
+          name: requests
+          schema:
+            type: integer
+            default: 150
+      responses:
+        '200':
+          description: Measured SCI carbon intensity report
+          content:
+            application/json:
+              schema:
+                type: object
+
+
 
 components:
   responses:

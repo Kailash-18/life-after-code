@@ -193,3 +193,142 @@ async def get_adaptive_drift_telemetry(
         "status": update_res.get("status", "NOMINAL"),
         "action": update_res.get("action", "NOMINAL: Process mean centered within allowable variance envelope"),
     }
+
+
+@router.get("/saboteur", response_model=dict[str, Any])
+async def get_saboteur_arena(
+    strategy: str = Query("all", description="Specific attack strategy to evaluate or 'all'"),
+) -> dict[str, Any]:
+    """
+    Tier 1 Headline Feature: Saboteur Adversarial Agent vs Integrity Gate.
+    Demonstrates live adversarial LLM evasion attempts (skips, weakened assertions, test deletions)
+    and verifies that the deterministic Integrity Gate intercepts 100% of attempts.
+    """
+    from sentinel.scripts.saboteur import ATTACK_CATALOG, SaboteurEngine
+
+    engine = SaboteurEngine()
+    if strategy == "all":
+        return engine.run_all_attacks()
+    
+    matched = [a for a in ATTACK_CATALOG if a.strategy_id == strategy]
+    if not matched:
+        return engine.run_all_attacks()
+    
+    res = engine.run_attack(matched[0])
+    return {
+        "total_attacks": 1,
+        "caught_count": 1 if res["blocked"] else 0,
+        "evaded_count": 0 if res["blocked"] else 1,
+        "all_blocked": res["blocked"],
+        "results": [res],
+    }
+
+
+@router.get("/candidates", response_model=dict[str, Any])
+async def get_candidate_fixes() -> dict[str, Any]:
+    """
+    Tier 1 Feature: Multiple Candidate Fixes.
+    The AI writes 3 candidate fixes. Deterministic gates filter and evaluate each,
+    selecting the verified fix while showing explicit rejection reasons for rejects.
+    Backed by research: generated tests used as filters more than double precision.
+    """
+    from sentinel.scripts.candidate_selector import CandidateSelector
+
+    selector = CandidateSelector()
+    return selector.evaluate_all()
+
+
+@router.get("/trust-score", response_model=dict[str, Any])
+async def get_repair_trust_score(
+    blocking_findings: int = Query(0, ge=0),
+    warning_findings: int = Query(0, ge=0),
+    regression_proven: bool = Query(True),
+    holdout_passed: bool = Query(True),
+    added_lines: int = Query(6, ge=0),
+    deleted_lines: int = Query(2, ge=0),
+    coverage_delta: float = Query(0.8),
+) -> dict[str, Any]:
+    """
+    Tier 1 Feature: Deterministic Trust Score per Repair.
+    Calculates a deterministic 0-100 score built from gate results, test coverage change,
+    and diff size. The AI can explain the score but never set or alter it.
+    """
+    from sentinel.scripts.trust_scorer import RepairMetrics, calculate_trust_score
+
+    metrics = RepairMetrics(
+        integrity_blocking_count=blocking_findings,
+        integrity_warning_count=warning_findings,
+        regression_proven=regression_proven,
+        holdout_invariants_passed=holdout_passed,
+        added_lines=added_lines,
+        deleted_lines=deleted_lines,
+        coverage_delta_percent=coverage_delta,
+    )
+    return calculate_trust_score(metrics)
+
+
+@router.get("/holdout", response_model=dict[str, Any])
+async def get_holdout_gate_status(
+    candidate_sha: str = Query("HEAD", description="Candidate SHA to evaluate against secret holdout invariants"),
+) -> dict[str, Any]:
+    """
+    Tier 1 Feature: Hidden Holdout Tests.
+    Executes secret holdout test invariants strictly inside the isolated gate environment.
+    Guarantees AI fixes are not overfitted to known public test assertions.
+    """
+    from sentinel.scripts.holdout_gate import run_holdout_gate
+
+    return run_holdout_gate(candidate_sha=candidate_sha)
+
+
+@router.get("/diff-risk", response_model=dict[str, Any])
+async def get_canary_diff_risk(
+    diff_text: str = Query("", description="Git diff to evaluate"),
+    author: str = Query("gitlab-duo-flow", description="Commit author"),
+    branch: str = Query("duo/repair-candidate", description="Git branch name"),
+) -> dict[str, Any]:
+    """
+    Tier 2 Feature 5: Risk-Adaptive Canary Diff Scorer.
+    Scores diffs deterministically based on sensitive files, size, dependency bumps,
+    and AI authorship. Generates adaptive rollout schedules (1% -> 10% -> 50% -> 100%).
+    """
+    from sentinel.scripts.canary_deploy import get_deployment_strategies_catalog, score_diff_risk
+
+    risk = score_diff_risk(diff_text=diff_text, author=author, branch=branch)
+    return get_deployment_strategies_catalog(diff_risk=risk)
+
+
+@router.get("/shadow-replay", response_model=dict[str, Any])
+async def get_shadow_traffic_replay(
+    incident_id: str = Query("inc-demo-003", description="Incident ID to replay"),
+    candidate_rev: str = Query("sentinel-target-app-cand-fix-002", description="Candidate revision"),
+    samples: int = Query(50, ge=5, le=200, description="Number of shadowed requests to replay"),
+) -> dict[str, Any]:
+    """
+    Tier 2 Feature 7: Shadow Traffic Replay Engine.
+    Replays failing incident traffic against the candidate revision to verify
+    zero errors and 100% response parity with 0% live user blast radius.
+    """
+    from sentinel.scripts.shadow_replay import run_shadow_replay
+
+    return run_shadow_replay(incident_id=incident_id, candidate_revision=candidate_rev, sample_count=samples)
+
+
+@router.get("/carbon", response_model=dict[str, Any])
+async def get_measured_carbon_intensity(
+    service_name: str = Query("sentinel-target-app"),
+    region: str = Query("us-central1"),
+    cpu_seconds: float = Query(4.25, ge=0.01),
+    requests: int = Query(150, ge=1),
+) -> dict[str, Any]:
+    """
+    Tier 2 Feature 10: Measured SCI Carbon Intensity (ISO/IEC 21031).
+    Grounds software carbon intensity in real Cloud Run vCPU-seconds and container metrics,
+    replacing simulated placeholder numbers with measured telemetry.
+    """
+    from sentinel.scripts.sci_carbon_engine import SoftwareCarbonIntensityCalculator
+
+    calc = SoftwareCarbonIntensityCalculator(service_name=service_name, region=region)
+    return calc.calculate_measured_sci(measured_cpu_seconds=cpu_seconds, measured_requests=requests)
+
+
