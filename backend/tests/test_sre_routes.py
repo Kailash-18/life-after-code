@@ -11,23 +11,38 @@ Validates:
 
 from __future__ import annotations
 
+from tests.helpers import FIX_SHA, ok, send
 
-def test_sre_composite_health_endpoint(client):
+
+def test_sre_health_without_measurement_is_no_data(client):
+    data = client.get("/api/v1/sre/health?slo_target=0.999").json()
+    assert data["status"] == "NO_DATA"
+    assert data["health_score"] is None and data["error_budget"] is None
+    drift = client.get("/api/v1/sre/drift").json()
+    assert drift["status"] == "NO_DATA" and drift["current_ewma"] is None
+
+
+def test_sre_composite_health_endpoint(client, hmac_secret):
+    ok(send(client, hmac_secret, "evaluator.verdict", commit_sha=FIX_SHA, source="sentinel/scripts/evaluator.py",
+            job_id=9301, data={"verdict": "PASS", "target": "candidate", "traffic_percent": 10,
+                               "error_rate": 0.004, "p95_ms": 41.5, "sample_size": 300}))
     res = client.get("/api/v1/sre/health?slo_target=0.999")
     assert res.status_code == 200
     data = res.json()
 
-    assert "health_score" in data
-    assert "status" in data
     assert data["status"] in ("PASS", "WARN", "FAIL")
-    assert "error_budget" in data
+    assert data["data_source"]["kind"] == "derived"
     assert "burn_rate" in data["error_budget"]
     assert "alert_tier" in data["error_budget"]
-    assert "hypothesis_testing" in data
     assert "p_value" in data["hypothesis_testing"]
     assert "is_significant" in data["hypothesis_testing"]
-    assert "latency_iqr" in data
     assert "median" in data["latency_iqr"]
+
+
+def test_sre_panels_say_where_numbers_come_from(client):
+    assert client.get("/api/v1/sre/opa").json()["data_source"]["kind"] == "reference"
+    assert client.get("/api/v1/sre/ebpf").json()["data_source"]["kind"] == "simulated"
+    assert client.get("/api/v1/sre/dr").json()["data_source"]["kind"] == "simulated"
 
 
 def test_sre_opa_compliance_nominal(client):

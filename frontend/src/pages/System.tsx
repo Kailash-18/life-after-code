@@ -4,7 +4,7 @@ import {
   getAdaptiveDriftStatus, getDisasterRecoveryStatus, getEBPFTelemetry, getOPACompliance, getS3StorageStatus, getSRECompositeHealth,
 } from '../api/client';
 import { useSentinel } from '../api/source';
-import type { AdaptiveDriftStatus, DisasterRecoveryStatus, EBPFTelemetryReport, OPAComplianceReport, S3StorageStatus, SRECompositeHealth } from '../api/types';
+import type { AdaptiveDriftStatus, DataSource, DisasterRecoveryStatus, EBPFTelemetryReport, OPAComplianceReport, S3StorageStatus, SRECompositeHealth } from '../api/types';
 import { useMission } from '../state/mission';
 import { Badge, Empty, PageHead, Section, ago } from '../ui/kit';
 
@@ -61,12 +61,16 @@ function Storage() {
   );
 }
 
-type Row = [string, string | number];
-function SimCard({ title, status, rows }: { title: string; status?: string; rows: Row[] | null }) {
+type Row = [string, string | number | null | undefined];
+const SOURCE_LABEL: Record<DataSource['kind'], string> = { measured: 'measured', derived: 'derived', reference: 'reference input', simulated: 'simulated' };
+
+/** One extra panel. Its source label says where the numbers come from, so simulated values are never read as telemetry. */
+function SimCard({ title, status, rows, ds }: { title: string; status?: string; rows: Row[] | null; ds?: DataSource }) {
   return (
     <div className="card">
-      <div className="verdict"><h3>{title}</h3>{status && <Badge>{status}</Badge>}</div>
-      {rows ? <dl className="kv">{rows.map(([k, v]) => <Fragment key={k}><dt>{k}</dt><dd className="mono">{v}</dd></Fragment>)}</dl> : <p className="small muted">No answer from the backend.</p>}
+      <div className="verdict"><h3>{title}</h3>{status && <Badge tone={status === 'NO_DATA' ? 'mute' : undefined}>{status.replace(/_/g, ' ')}</Badge>}</div>
+      {rows ? <dl className="kv">{rows.map(([k, v]) => <Fragment key={k}><dt>{k}</dt><dd className="mono">{v ?? '—'}</dd></Fragment>)}</dl> : <p className="small muted">No answer from the backend.</p>}
+      {ds && <p className="small muted" style={{ marginTop: 10 }}><Badge tone={ds.kind === 'measured' ? 'ok' : ds.kind === 'derived' ? 'info' : 'warn'}>{SOURCE_LABEL[ds.kind] ?? ds.kind}</Badge> {ds.note}</p>}
     </div>
   );
 }
@@ -89,18 +93,21 @@ function Simulated() {
     getAdaptiveDriftStatus(ctrl.signal).then(setDrift).catch(() => {});
     return () => ctrl.abort();
   }, [open, source]);
+  const sreRows: Row[] | null = sre && (sre.health_score === null || !sre.error_budget || !sre.hypothesis_testing
+    ? [['score', 'no evaluator measurement yet']]
+    : [['score', sre.health_score], ['burn rate', `${sre.error_budget.burn_rate}× (${sre.error_budget.alert_tier})`], ['Mann-Whitney p', sre.hypothesis_testing.p_value]]);
   return (
     <details className="sim" onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}>
-      <summary>Simulated telemetry <Badge tone="warn">not part of the loop</Badge></summary>
+      <summary>Extra telemetry <Badge tone="warn">not part of the loop</Badge></summary>
       <div className="sim__body stack">
-        <p className="note note--warn">The backend computes these from simulations and a reference manifest (eBPF traces, a disaster-recovery drill, an OPA policy check), not from measurements of the running service. Health, rollback, merge and recovery are decided only by the evaluator, the gates and CI.</p>
+        <p className="note note--warn">Each panel says where its numbers come from. Only panels marked “measured” read the running service; the rest are derived, reference inputs or simulations. Health, rollback, merge and recovery are decided only by the evaluator, the gates and CI.</p>
         {source === 'demo' ? <p className="small muted">Not shown in the demo scenario.</p> : (
           <div className="grid g2">
-            <SimCard title="Error budget and rank-sum test" status={sre?.status} rows={sre && [['score', sre.health_score], ['burn rate', `${sre.error_budget.burn_rate}× (${sre.error_budget.alert_tier})`], ['Mann-Whitney p', sre.hypothesis_testing.p_value]]} />
-            <SimCard title="OPA policy check" status={opa?.status} rows={opa && [['package', opa.policy_package], ['compliance', `${opa.compliance_score}%`], ['violations', opa.violations_count]]} />
-            <SimCard title="eBPF socket traces" status={ebpf?.status} rows={ebpf && [['transport score', ebpf.mean_transport_health_score], ['server TTFB', `${ebpf.latency_decomposition_averages_ms.server_ttfb} ms`], ['TCP retransmits', ebpf.kernel_socket_aggregates.total_tcp_retransmits]]} />
-            <SimCard title="Disaster-recovery drill" status={dr?.status} rows={dr && [['regions', `${dr.primary_region} → ${dr.secondary_region}`], ['RTO', `${dr.rto_seconds}s`], ['RPO', `${dr.rpo_seconds}s`]]} />
-            <SimCard title="Latency drift (CUSUM)" status={drift?.status} rows={drift && [['observed', drift.observed_value], ['EWMA', drift.current_ewma], ['drift', drift.drift_detected ? 'yes' : 'no']]} />
+            <SimCard title="Error budget and rank-sum test" status={sre?.status} rows={sreRows} ds={sre?.data_source} />
+            <SimCard title="OPA policy check" status={opa?.status} rows={opa && [['package', opa.policy_package], ['compliance', `${opa.compliance_score}%`], ['violations', opa.violations_count]]} ds={opa?.data_source} />
+            <SimCard title="eBPF socket traces" status={ebpf?.status} rows={ebpf && [['transport score', ebpf.mean_transport_health_score], ['server TTFB', `${ebpf.latency_decomposition_averages_ms.server_ttfb} ms`], ['TCP retransmits', ebpf.kernel_socket_aggregates.total_tcp_retransmits]]} ds={ebpf?.data_source} />
+            <SimCard title="Disaster-recovery drill" status={dr?.status} rows={dr && [['regions', `${dr.primary_region} → ${dr.secondary_region}`], ['RTO', `${dr.rto_seconds}s`], ['RPO', `${dr.rpo_seconds}s`]]} ds={dr?.data_source} />
+            <SimCard title="Latency drift (CUSUM)" status={drift?.status} rows={drift && [['observed', drift.observed_value], ['EWMA', drift.current_ewma], ['drift', drift.drift_detected ? 'yes' : 'no']]} ds={drift?.data_source} />
           </div>
         )}
       </div>

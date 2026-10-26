@@ -68,6 +68,11 @@ class CodeVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
 
+# Inline marker for a reviewed, non-secret placeholder value. It must sit on the same line, so
+# every exception stays visible in code review.
+ALLOW_MARKER = "sast: allow-public-placeholder"
+
+
 def scan_file(file_path: Path) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
     try:
@@ -77,6 +82,9 @@ def scan_file(file_path: Path) -> list[dict[str, Any]]:
 
     # 1. Regex credential scanning
     for line_idx, line in enumerate(content.splitlines(), start=1):
+        if ALLOW_MARKER in line:
+            # Reviewed, deliberately public placeholder (e.g. a dev default refused in production).
+            continue
         for pattern, msg in CREDENTIAL_REGEXES:
             if pattern.search(line):
                 findings.append({
