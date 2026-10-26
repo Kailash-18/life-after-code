@@ -6,14 +6,14 @@ the real backend, both gates and Mission Control, with one incident recovered an
 
 ## Final check (Oct 26, evening) — what still blocks submission
 
-All suites green on `master` + PR #16: 160 root tests, 161 backend, 7 app, ruff clean, frontend typechecks and builds,
+All suites green on PR #21 (master + frontend redesign, Oct 27): 164 root tests, 163 backend, 7 app, ruff clean, frontend typechecks and builds,
 CI YAML parses and every script/flag it calls exists. Both gates re-run on the seeded fault: fix PROVEN + Integrity PASS;
 weakened-test repair blocked. Mission Control checked live against the backend (desktop + phone) and in demo mode.
 
 | # | Item | Owner | Status |
 |---|---|---|---|
 | 1 | **Public GitLab project** with the code, MIT licence and visible pipeline history (rule) | Team | Not done — code is on GitHub |
-| 2 | **One real pipeline run on GitLab**: deploy canary → evaluator FAIL on the seeded fault → rollback → evidence | Kailash | `--dry-run` is now off by default (`SENTINEL_DRY_RUN`), branch rules fixed; the evaluator/rollback still probe the placeholder `http://sentinel-target-app:8080` — set the real Cloud Run URLs |
+| 2 | **One real pipeline run on GitLab**: evaluator FAIL on the seeded fault, then rollback + evidence | Kailash | Possible without cloud now: `SENTINEL_DEPLOY_MODE=local` (default, Krishna PR #18/#19) runs this commit's app next to the previous one and the real evaluator measures both; the pipeline fails on an unhealthy candidate (no deploy, no rollback). `cloudrun` mode does the full canary + rollback and needs `GCP_PROJECT_ID`, `GCP_REGION`, `GCP_SA_KEY`, `SENTINEL_BACKEND_URL`, `SENTINEL_HMAC_SECRET` |
 | 3 | **Duo flow run once on GitLab** (paste flow, "Pipeline: Failed" trigger, service account) | Samvit | Not done — flow + setup doc ready |
 | 4 | **Deploy** backend + demo app on Cloud Run; frontend hosted with `VITE_API_BASE`; backend `CORS_ORIGINS` set to the frontend URL | Kailash + Samvit | Not done |
 | 5 | **CI/CD variables**: `SENTINEL_HMAC_SECRET` (new value — the old one is public in git history), `SENTINEL_BACKEND_URL`, `GITLAB_PROJECT_TOKEN`; backend `GITLAB_PROJECT_ID`, `GITLAB_READ_TOKEN`, `GITLAB_WEBHOOK_SECRET` + MR/pipeline webhook | Team | Not done |
@@ -27,6 +27,19 @@ Done since Oct 24: backend truth gaps and analysis ingestion (Krishna), one inci
 release identity by commit (Krishna, PR #16), CI variable syntax and default branch (Krishna/Kailash),
 public HMAC default removed from `.gitlab-ci.yml`, gate bypasses and fake merge/rollback removed (Samvit),
 SRE telemetry panels labelled as simulated, README with run steps, honest status note in `docs/verification.md`.
+
+## Earlier status table (Oct 23–26, kept for the record)
+
+| # | Item | Owner | Done when |
+|---|---|---|---|
+| 1 | **Move the repo to GitLab.** The rules require a public GitLab project with visible pipeline history; ours is on GitHub. | Team | Public GitLab project; MIT licence shows in About |
+| 2 | **Make CI run for real.** Deploy, rollback, evidence and merge all use `--dry-run`. The `${VAR:-default}` values in `variables:` are not GitLab syntax. Jobs only run on `main`, but our default branch is `master`. | Kailash | One pipeline on GitLab deploys a canary, catches the fault, rolls back and collects evidence <br>**Done (Kailash, Oct 26):** `.gitlab-ci.yml` variable blocks corrected to standard GitLab CI syntax; branch rules updated to allow `$CI_DEFAULT_BRANCH`, `master`, and `main`; canary deploy, rollback, and evidence jobs updated with dynamic `$SENTINEL_DRY_RUN` execution flags. |
+| 3 | **Carry one incident ID through every job.** The evaluator, rollback, evidence and gate jobs must all send the same `incident_id`. | Kailash + Krishna | The backend shows one incident moving through each stage <br>**Backend side done (Krishna, Oct 24):** jobs no longer need to pass the id. The backend opens `inc-<pipeline_id>` from the evaluator FAIL and links rollback, evidence (its own id becomes an alias), the `duo/fix/*` MR, gates, merge and the redeploy on the merge commit. Proven with Kailash's real `emit_event.py` in `backend/tests/test_team_pipeline_integration.py`. Still needed from CI: real (non `--dry-run`) jobs and the MR webhook configured. |
+| 4 | **Run the Duo flow once on GitLab.** Paste the flow, add a "Pipeline: Failed" trigger, run it on the seeded fault and record the credit cost. | Samvit | The flow opens `duo/fix/inc-…`, and the gates run on that MR |
+| 5 | **Fix the backend truth gaps.** `/status` invents health numbers; releases never update; a rollback with no probe result counts as healthy; `/state/rollback`, `/restore` and `/snapshot` are unauthenticated (and rollback reports SUCCESS on failure); `detected_at` is empty; state is in memory and is lost on restart. | Krishna | `/status` and `/releases` come from recorded events only, and the state routes are removed or need auth <br>**Done (Krishna, Oct 24)** except restart persistence: `/status`, `/releases` from events only; rollback needs `post_rollback_probe_ok`; `detected_at` set; `/state/*` writes need the CI HMAC and rollback reports `STATE_RESTORED_TRAFFIC_NOT_SHIFTED` unless gcloud really moved traffic. Storage is SQLite in the container: still lost on restart until Firestore/Cloud SQL is decided. |
+| 6 | **Store the AI analysis.** The flow commits `sentinel/incidents/<id>/analysis.json`; the backend should attach it to the attempt (merge-request webhook or the gate job). Until then, the "AI proposes" section stays empty in live mode. | Krishna | Analysis shows in the incident room <br>**Done (Krishna, Oct 24)**: on the `duo/fix/<id>` MR webhook (or `repair.proposed`) the backend fetches `analysis.json` at the fix SHA, validates it and stores it as advisory. Needs `GITLAB_PROJECT_ID` + `GITLAB_READ_TOKEN` on the backend. |
+| 7 | **Deploy.** Run the backend and target app on Cloud Run, and the frontend on hosting with `VITE_API_BASE` set. Keep it up until about Nov 16 for the bonus. | Kailash (+ Samvit for the frontend) | Public links work |
+| 8 | **Demo video** (under 3 min, public YouTube), Devpost text, README with run steps. | Unassigned | Submitted |
 
 ## Local end-to-end run with the real scripts (Krishna, Oct 24)
 
