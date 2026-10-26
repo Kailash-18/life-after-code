@@ -57,7 +57,7 @@ plan:finops-greenops:
   stage: lint
   image: python:3.11-slim
   script:
-    - echo "==> [Stage: PLAN] FinOps Forecast & ISO/IEC 21031 SCI Carbon Assessment"
+    - 'echo "==> [Stage: PLAN] FinOps Forecast & ISO/IEC 21031 SCI Carbon Assessment"'
     - python sentinel/scripts/finops_engine.py --dry-run
     - python sentinel/scripts/sci_carbon_engine.py --dry-run
   artifacts:
@@ -274,7 +274,7 @@ govern:cis-zero-trust:
   stage: security
   image: python:3.11-slim
   script:
-    - echo "==> [Stage: GOVERN] CIS Multi-Cloud Zero-Trust Benchmark Audit"
+    - 'echo "==> [Stage: GOVERN] CIS Multi-Cloud Zero-Trust Benchmark Audit"'
     - python sentinel/scripts/cis_governance_guard.py --dry-run
   artifacts:
     when: always
@@ -426,7 +426,7 @@ rollback:on-breach:
   stage: rollback
   needs: [deploy:canary, evaluate:canary-step]
   script:
-    - echo "==> Breach or failed step: sending 100 % of traffic back to $STABLE_REVISION"
+    - 'echo "==> Breach or failed step: sending 100 % of traffic back to $STABLE_REVISION"'
     - python3 sentinel/scripts/rollback.py --service "$TARGET_APP_SERVICE" --region "$GCP_REGION" --stable-url "$STABLE_URL" --known-good-rev "$STABLE_REVISION" --candidate-rev "$CANDIDATE_REVISION" --pipeline-id "$CI_PIPELINE_ID" --job-id "$CI_JOB_ID" --commit-sha "$CI_COMMIT_SHA"
   artifacts:
     when: always
@@ -476,7 +476,7 @@ evidence:collect:
 gate:regression-proof:
   extends: .repair-mr-gate
   script:
-    - echo "==> Regression proof for $INCIDENT_ID: $REGRESSION_TEST must fail with an assertion on $CI_MERGE_REQUEST_DIFF_BASE_SHA and pass on $CI_COMMIT_SHA"
+    - 'echo "==> Regression proof for $INCIDENT_ID: $REGRESSION_TEST must fail with an assertion on $CI_MERGE_REQUEST_DIFF_BASE_SHA and pass on $CI_COMMIT_SHA"'
     - status=0
     - python sentinel/scripts/regression_proof.py --broken "$CI_MERGE_REQUEST_DIFF_BASE_SHA" --fix "$CI_COMMIT_SHA" --test "$REGRESSION_TEST" --output-json artifacts/regression-proof.json --output-junit artifacts/regression-proof.xml || status=$?
     - python sentinel/scripts/report_gate_verdict.py --gate regression_proof --report artifacts/regression-proof.json --incident-id "$INCIDENT_ID"
