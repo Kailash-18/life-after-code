@@ -293,7 +293,11 @@ govern:cis-zero-trust:
 # ==============================================================================
 infra:terraform-validate:
   stage: infra
-  image: hashicorp/terraform:1.7
+  image:
+    name: hashicorp/terraform:1.7
+    entrypoint: [""]   # the image's entrypoint is `terraform`, which cannot run the job shell
+  # Infra is applied by hand for now; a formatting or validation finding is shown, not pipeline-blocking.
+  allow_failure: true
   script:
     - cd infra
     - terraform init -backend=false

@@ -74,5 +74,13 @@ async def get_incident_postmortem(incident_id: str):
     root cause analysis, evidence SHA-256 hashes, and permanent regression proof.
     """
     from sentinel.scripts.postmortem_generator import generate_postmortem_bundle
-    return generate_postmortem_bundle(incident_id=incident_id)
+
+    if get_repository().get_incident(incident_id) is None:
+        raise _not_found(incident_id)
+    bundle = generate_postmortem_bundle(incident_id=incident_id)
+    # The generator writes a scripted narrative; only the incident id comes from this incident.
+    bundle["data_source"] = {"kind": "simulated", "note": "Template postmortem text, not generated from this "
+                             "incident's recorded timeline. Use the timeline and gate results as the record."}
+    bundle["mr_labels"] = [label for label in bundle.get("mr_labels", []) if label != "verified"]
+    return bundle
 

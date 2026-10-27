@@ -21,6 +21,10 @@ ignore = [
     "F841",  # Local variable assigned but never used in mocks
     "W293",  # Blank line contains whitespace (preserve teammate original formatting)
 ]
+[tool.ruff.lint.per-file-ignores]
+# Two trailing spaces are Markdown line breaks inside the generated postmortem text.
+"sentinel/scripts/postmortem_generator.py" = ["W291"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
